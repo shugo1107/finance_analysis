@@ -1,5 +1,6 @@
 import datetime
 import logging
+import math
 import time
 
 import numpy as np
@@ -8,8 +9,9 @@ import talib
 from app.models.candle import factory_candle_class
 from app.models.dfcandle import DataFrameCandle
 from app.models.events import SignalEvents
-from oanda.oanda import APIClient
-from oanda.oanda import Order
+from platforms import OandaClient
+from platforms import BitflyerClient
+from platforms import Order
 from tradingalgo.algo import ichimoku_cloud
 
 import constants
@@ -40,8 +42,11 @@ def duration_seconds(duration: str) -> int:
 class AI(object):
 
     def __init__(self, product_code, use_percent, duration, past_period,
-                 stop_limit_percent, back_test, live_practice):
-        self.API = APIClient(settings.access_token, settings.account_id, environment=live_practice)
+                 stop_limit_percent, back_test, live_practice, client="oanda"):
+        if client.lower() == "oanda":
+            self.API = OandaClient(settings.oanda_access_token, settings.oanda_account_id, environment=live_practice)
+        elif client.lower() == "bitflyer":
+            self.API = BitflyerClient(settings.bitflyer_access_key, settings.bitflyer_secret_key)
 
         if back_test:
             self.signal_events = SignalEvents()
@@ -54,12 +59,16 @@ class AI(object):
         self.past_period = past_period
         self.optimized_trade_params = None
         self.stop_limit = 0
+        self.atr_buy_stop_limit = 0
+        self.atr_sell_stop_limit = 0
         self.stop_limit_percent = stop_limit_percent
         self.back_test = back_test
         self.start_trade = datetime.datetime.utcnow()
         self.candle_cls = factory_candle_class(self.product_code, self.duration)
         self.update_optimize_params(False)
         self.in_atr_trade = False
+        self.client = client
+        self.trade_list = []
 
     def update_optimize_params(self, is_continue: bool):
         logger.info('action=update_optimize_params status=run')
@@ -88,15 +97,15 @@ class AI(object):
             logger.warning('action=buy status=false error=previous_was_buy')
             return False, close_trade
 
-        trades = self.API.get_open_trade()
         sum_price = 0
         closed_units = 0
-        for trade in trades:
+        for trade in self.trade_list:
             if trade.side == constants.SELL:
                 close_trade = True
-                closed_trade = self.API.trade_close(trade.trade_id)
-                sum_price += closed_trade.price * abs(closed_trade.units)
-                closed_units += abs(closed_trade.units)
+                if self.client == "oanda":
+                    closed_trade = self.API.trade_close(trade.trade_id)
+                    sum_price += closed_trade.price * abs(closed_trade.units)
+                    closed_units += abs(closed_trade.units)
 
         order = Order(self.product_code, constants.BUY, units - closed_units)
         trade = self.API.send_order(order)
@@ -119,15 +128,15 @@ class AI(object):
             logger.warning('action=sell status=false error=previous_was_sell')
             return False, close_trade
 
-        trades = self.API.get_open_trade()
         sum_price = 0
         closed_units = 0
-        for trade in trades:
+        for trade in self.trade_list:
             if trade.side == constants.BUY:
                 close_trade = True
-                closed_trade = self.API.trade_close(trade.trade_id)
-                sum_price += closed_trade.price * abs(closed_trade.units)
-                closed_units += abs(closed_trade.units)
+                if self.client == "oanda":
+                    closed_trade = self.API.trade_close(trade.trade_id)
+                    sum_price += closed_trade.price * abs(closed_trade.units)
+                    closed_units += abs(closed_trade.units)
 
         order = Order(self.product_code, constants.SELL, units - closed_units)
         trade = self.API.send_order(order)
@@ -138,8 +147,10 @@ class AI(object):
 
     def trade(self):
         logger.info('action=trade status=run')
+
         params = self.optimized_trade_params
         if params is None:
+            self.update_optimize_params(False)
             return
 
         df = DataFrameCandle(self.product_code, self.duration)
@@ -159,6 +170,10 @@ class AI(object):
             mid_list = talib.EMA(np.array(df.closes), params.atr_n)
             atr_up = (mid_list + atr * params.atr_k).tolist()
             atr_down = (mid_list - atr * params.atr_k).tolist()
+            if atr_up[-1] < self.atr_sell_stop_limit:
+                self.atr_sell_stop_limit = atr_up[-1]
+            if atr_down[-1] > self.atr_buy_stop_limit:
+                self.atr_buy_stop_limit = atr_down[-1]
 
         if params.ichimoku_enable:
             tenkan, kijun, senkou_a, senkou_b, chikou = ichimoku_cloud(df.closes)
@@ -215,58 +230,82 @@ class AI(object):
                 if rsi_values[i-1] > params.rsi_sell_thread and rsi_values[i] <= params.rsi_sell_thread:
                     sell_point += 1
 
-            if not self.in_atr_trade and (buy_point > 0 or self.stop_limit < df.candles[i].close):
+            if not self.in_atr_trade and (buy_point > 0 or
+                                          len(self.trade_list) > 1 and self.stop_limit < df.candles[i].close):
                 balance = self.API.get_balance()
-                units = int(float(balance.available) * self.use_percent)
+                if self.product_code == "FX_BTC_JPY":
+                    use_balance = balance.available * settings.use_percent
+                    ticker = self.API.get_ticker(self.product_code)
+                    units = math.floor((use_balance / ticker.ask) * 10000) / 10000
+                else:
+                    units = int(float(balance.available) * self.use_percent)
                 could_buy, close_trade = self.buy(df.candles[i], units)
                 if not could_buy:
                     continue
 
                 self.stop_limit = df.candles[i].close * self.stop_limit_percent
+                self.trade_list = self.API.get_open_trade()
                 if close_trade:
                     self.update_optimize_params(is_continue=True)
 
-            if not self.in_atr_trade and (sell_point > 0 or self.stop_limit > df.candles[i].close):
+            if not self.in_atr_trade and (sell_point > 0 or
+                                          (len(self.trade_list) > 1 and self.stop_limit > df.candles[i].close)):
                 balance = self.API.get_balance()
-                units = int(float(balance.available) * self.use_percent)
+                if self.product_code == "FX_BTC_JPY":
+                    use_balance = balance.available * settings.use_percent
+                    ticker = self.API.get_ticker(self.product_code)
+                    units = math.floor((use_balance / ticker.bid) * 10000) / 10000
+                else:
+                    units = int(float(balance.available) * self.use_percent)
                 could_sell, close_trade = self.sell(df.candles[i], units)
                 if not could_sell:
                     continue
 
                 self.stop_limit = df.candles[i].close * (2 - self.stop_limit_percent)
+                self.trade_list = self.API.get_open_trade()
                 if close_trade:
                     self.update_optimize_params(is_continue=True)
 
-        for i in range(1, len(df.candles)):
-            atr_buy_point, atr_sell_point = 0, 0
-            if params.atr_enable and params.atr_n <= i:
-                if atr_up[i - 1] > df.candles[i - 1].close and atr_up[i] <= df.candles[i].close:
-                    atr_buy_point += 1
+        if params.atr_enable:
+            for i in range(1, len(df.candles)):
+                atr_buy_point, atr_sell_point = 0, 0
+                if params.atr_enable and params.atr_n <= i:
+                    if atr_up[i - 1] > df.candles[i - 1].close and atr_up[i] <= df.candles[i].close:
+                        atr_buy_point += 1
 
-                if atr_down[i - 1] < df.candles[i - 1].close and atr_down[i] >= df.candles[i].close:
-                    atr_sell_point += 1
+                    if atr_down[i - 1] < df.candles[i - 1].close and atr_down[i] >= df.candles[i].close:
+                        atr_sell_point += 1
 
-            if atr_buy_point > 0 or self.stop_limit < df.candles[i].close:
-                balance = self.API.get_balance()
-                units = int(balance.available * self.stop_limit_percent / (atr_up[i] - atr_down[i]))
-                could_buy, close_trade = self.buy(df.candles[i], units)
-                if not could_buy:
-                    continue
-                self.in_atr_trade = True
-                self.stop_limit = atr_down[i]
-                if close_trade:
-                    self.in_atr_trade = False
-                    self.update_optimize_params(is_continue=True)
+                if atr_buy_point > 0 or self.atr_sell_stop_limit < df.candles[i].close:
+                    balance = self.API.get_balance()
+                    if self.product_code == "FX_BTC_JPY":
+                        units = math.floor(balance.available * self.stop_limit_percent / (atr_up[i] - atr_down[i]) * 10000) / 10000
+                    else:
+                        units = int(balance.available * self.stop_limit_percent / (atr_up[i] - atr_down[i]))
+                    could_buy, close_trade = self.buy(df.candles[i], units)
+                    if not could_buy:
+                        continue
+                    self.in_atr_trade = True
+                    self.trade_list = self.API.get_open_trade()
+                    self.atr_buy_stop_limit = atr_down[i]
+                    if close_trade:
+                        self.in_atr_trade = False
+                        self.update_optimize_params(is_continue=True)
 
-            if atr_sell_point > 0 or self.stop_limit > df.candles[i].close:
-                balance = self.API.get_balance()
-                units = int(balance.available * self.stop_limit_percent / (atr_up[i] - atr_down[i]))
-                could_sell, close_trade = self.sell(df.candles[i], units)
-                if not could_sell:
-                    continue
+                if atr_sell_point > 0 or self.atr_buy_stop_limit > df.candles[i].close:
+                    balance = self.API.get_balance()
+                    if self.product_code == "FX_BTC_JPY":
+                        units = math.floor(
+                            balance.available * self.stop_limit_percent / (atr_up[i] - atr_down[i]) * 10000) / 10000
+                    else:
+                        units = int(balance.available * self.stop_limit_percent / (atr_up[i] - atr_down[i]))
+                    could_sell, close_trade = self.sell(df.candles[i], units)
+                    if not could_sell:
+                        continue
 
-                self.in_atr_trade = True
-                self.stop_limit = atr_up[i]
-                if close_trade:
-                    self.in_atr_trade = False
-                    self.update_optimize_params(is_continue=True)
+                    self.in_atr_trade = True
+                    self.trade_list = self.API.get_open_trade()
+                    self.atr_sell_stop_limit = atr_up[i]
+                    if close_trade:
+                        self.in_atr_trade = False
+                        self.update_optimize_params(is_continue=True)

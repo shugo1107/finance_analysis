@@ -14,11 +14,11 @@ from oandapyV20.endpoints.pricing import PricingStream
 from oandapyV20.exceptions import V20Error
 
 import constants
-from platform import Balance
-from platform import Ticker
-from platform import Order
-from platform import OrderTimeoutError
-from platform import Trade
+from platforms import Balance
+from platforms import Ticker
+from platforms import Order
+from platforms import OrderTimeoutError
+from platforms import Trade
 import settings
 
 
@@ -90,7 +90,7 @@ class APIClient(object):
             resp = self.client.request(req)
         except V20Error as e:
             logger.error(f'action=get_candle_volume error={e}')
-            raise
+            raise e
 
         return int(resp['candles'][0]['volume'])
 
@@ -132,7 +132,7 @@ class APIClient(object):
             logger.info(f'action=send_order resp={resp}')
         except V20Error as e:
             logger.error(f'action=send_order error={e}')
-            raise OrderTimeoutError
+            raise
         order_id = resp['orderCreateTransaction']['id']
         order = self.wait_order_complete(order_id)
         if not order:

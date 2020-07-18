@@ -257,7 +257,7 @@ class DataFrameCandle(object):
         best_period_1 = 7
         best_period_2 = 14
 
-        for period_1 in range(5, 15):
+        for period_1 in range(5, 12):
             for period_2 in range(12, 20):
                 signal_events = self.back_test_ema(period_1, period_2)
                 if signal_events is None:
@@ -332,7 +332,7 @@ class DataFrameCandle(object):
 
     def optimize_atr(self):
         performance = 0
-        best_n = 20
+        best_n = 14
         best_k = 2.0
 
         for n in range(5, 20):
@@ -465,12 +465,12 @@ class DataFrameCandle(object):
 
         ema_ranking = Dict2Obj({'performance': ema_performance, 'enable': False})
         bb_ranking = Dict2Obj({'performance': bb_performance, 'enable': False})
-        atr_ranking = Dict2Obj({'performance': atr_performance, 'enable': False})
+        atr_ranking = Dict2Obj({'performance': atr_performance, 'enable': True})
         ichimoku_ranking = Dict2Obj({'performance': ichimoku_performance, 'enable': False})
         rsi_ranking = Dict2Obj({'performance': rsi_performance, 'enable': False})
         macd_ranking = Dict2Obj({'performance': macd_performance, 'enable': False})
 
-        rankings = [ema_ranking, bb_ranking, atr_ranking, ichimoku_ranking, rsi_ranking, macd_ranking]
+        rankings = [ema_ranking, bb_ranking, ichimoku_ranking, rsi_ranking, macd_ranking]
         rankings = sorted(rankings, key=lambda o: o.performance, reverse=True)
 
         is_enable = False

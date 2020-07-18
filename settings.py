@@ -6,9 +6,20 @@ from utils.utils import bool_from_str
 conf = configparser.ConfigParser()
 conf.read('settings.ini')
 
-account_id = conf['oanda']['account_id']
-access_token = conf['oanda']['access_token']
-product_code = conf['oanda']['product_code']
+client = "bitflyer"
+
+oanda_account_id = conf['oanda']['account_id']
+oanda_access_token = conf['oanda']['access_token']
+oanda_product_code = conf['oanda']['product_code']
+
+bitflyer_access_key = conf['bitflyer']['api_key']
+bitflyer_secret_key = conf['bitflyer']['api_secret']
+bitflyer_product_code = conf['bitflyer']['product_code']
+
+if client.lower() == "oanda":
+    product_code = oanda_product_code
+elif client.lower() == "bitflyer":
+    product_code = bitflyer_product_code
 
 db_name = conf['db']['name']
 db_driver = conf['db']['driver']

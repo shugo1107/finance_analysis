@@ -104,6 +104,34 @@ class UsdJpyBaseCandle5S(BaseCandleMixin, Base):
     __tablename__ = 'USD_JPY_5S'
 
 
+class FxBtcJpyBaseCandle1D(BaseCandleMixin, Base):
+    __tablename__ = 'FX_BTC_JPY_1D'
+
+
+class FxBtcJpyBaseCandle1H(BaseCandleMixin, Base):
+    __tablename__ = 'FX_BTC_JPY_1H'
+
+
+class FxBtcJpyBaseCandle30M(BaseCandleMixin, Base):
+    __tablename__ = 'FX_BTC_JPY_30M'
+
+
+class FxBtcJpyBaseCandle15M(BaseCandleMixin, Base):
+    __tablename__ = 'FX_BTC_JPY_15M'
+
+
+class FxBtcJpyBaseCandle5M(BaseCandleMixin, Base):
+    __tablename__ = 'FX_BTC_JPY_5M'
+
+
+class FxBtcJpyBaseCandle1M(BaseCandleMixin, Base):
+    __tablename__ = 'FX_BTC_JPY_1M'
+
+
+class FxBtcJpyBaseCandle5S(BaseCandleMixin, Base):
+    __tablename__ = 'FX_BTC_JPY_5S'
+
+
 def factory_candle_class(product_code, duration):
     if product_code == constants.PRODUCT_CODE_USD_JPY:
         if duration == constants.DURATION_5S:
@@ -120,6 +148,21 @@ def factory_candle_class(product_code, duration):
             return UsdJpyBaseCandle1H
         if duration == constants.DURATION_1D:
             return UsdJpyBaseCandle1D
+    if product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
+        if duration == constants.DURATION_5S:
+            return FxBtcJpyBaseCandle5S
+        if duration == constants.DURATION_1M:
+            return FxBtcJpyBaseCandle1M
+        if duration == constants.DURATION_5M:
+            return FxBtcJpyBaseCandle5M
+        if duration == constants.DURATION_15M:
+            return FxBtcJpyBaseCandle15M
+        if duration == constants.DURATION_30M:
+            return FxBtcJpyBaseCandle30M
+        if duration == constants.DURATION_1H:
+            return FxBtcJpyBaseCandle1H
+        if duration == constants.DURATION_1D:
+            return FxBtcJpyBaseCandle1D
 
 
 def create_candle_with_duration(product_code, duration, ticker):

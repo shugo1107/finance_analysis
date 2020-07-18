@@ -686,6 +686,11 @@
             send();
         }
 
+        function changeProduct(s){
+            config.candlestick.product_code = s;
+            send();
+        }
+
         setInterval(send, 1000 * 3);
         window.onload = function () {
             send();
@@ -854,6 +859,16 @@
 </div>
 
 <div>
+    <button onclick="changeProduct('USD_JPY');">USD_JPY</button>
+    <button onclick="changeProduct('EUR_JPY');">EUR_JPY</button>
+    <button onclick="changeProduct('EUR_USD');">EUR_USD</button>
+    <button onclick="changeProduct('GBP_JPY');">GBP_JPY</button>
+    <button onclick="changeProduct('GBP_USD');">GBP_USD</button>
+    <button onclick="changeProduct('AUD_JPY');">AUD_JPY</button>
+    <button onclick="changeProduct('FX_BTC_JPY');">FX_BTC_JPY</button>
+</div>
+
+<div>
     SMA <input id="inputSma" type="checkbox">
     Period<input id="inputSmaPeriod1" type="text" value="7" style="width: 15px;">
     <input id="inputSmaPeriod2" type="text" value="14" style="width: 15px;">
@@ -875,7 +890,7 @@
 
 <div>
     Atr <input id="inputAtr" type="checkbox">
-    N <input id="inputAtrN" type="text" value="20" style="width: 15px;">
+    N <input id="inputAtrN" type="text" value="14" style="width: 15px;">
     K <input id="inputAtrK" type="text" value="2" style="width: 15px;">
 </div>
 
