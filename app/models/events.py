@@ -1,4 +1,6 @@
 import datetime
+import json
+import requests
 
 import omitempty
 from sqlalchemy import Column
@@ -98,6 +100,12 @@ class SignalEvents(object):
             signal_event.save()
 
         self.signals.append(signal_event)
+        # requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+        #     'text': f'signal event, time: {signal_event.time}, product_code: {signal_event.product_code}, side: {signal_event.side}, price: {signal_event.price}, units: {signal_event.units}',  # 通知内容
+        #     'username': u'Market-Signal-Bot',  # ユーザー名
+        #     'icon_emoji': u':smile_cat:',  # アイコン
+        #     'link_names': 1,  # 名前をリンク化
+        # }))
         return True
 
     def sell(self, product_code, time, price, units, save):

@@ -473,17 +473,12 @@ class DataFrameCandle(object):
         rankings = [ema_ranking, bb_ranking, ichimoku_ranking, rsi_ranking, macd_ranking]
         rankings = sorted(rankings, key=lambda o: o.performance, reverse=True)
 
-        is_enable = False
         for i, ranking in enumerate(rankings):
             if i >= settings.num_ranking:
                 break
 
             if ranking.performance > 0:
                 ranking.enable = True
-                is_enable = True
-
-        if not is_enable:
-            return None
 
         return Dict2Obj({
             'ema_enable': ema_ranking.enable,

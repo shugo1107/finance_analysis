@@ -1,5 +1,7 @@
 from datetime import datetime
+import json
 import logging
+import requests
 import time
 
 import dateutil.parser
@@ -111,6 +113,12 @@ class APIClient(object):
                     callback(ticker)
 
         except V20Error as e:
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': u'oanda streaming stops',  # 通知内容
+                'username': u'Market-Signal-Bot',  # ユーザー名
+                'icon_emoji': u':smile_cat:',  # アイコン
+                'link_names': 1,  # 名前をリンク化
+            }))
             logger.error(f'action=get_realtime_ticker error={e}')
             raise
 
@@ -223,4 +231,33 @@ class APIClient(object):
             price=float(resp['orderFillTransaction']['price'])
         )
         return trade
+
+    def send_stop_loss(self, order: Order) -> Trade:
+        path = '/v1/me/sendparentorder'
+        resp = self.private.base_post(path=path, parameters=[{
+            "product_code": order.product_code, "condition_type": order.order_type, "side": order.side,
+            "trigger_price": order.price, "size": order.units}])
+        if resp['status_code'] >= 400:
+            logger.error(f'action=send_stop error={resp["response"]["error_message"]}')
+            raise ValueError
+        else:
+            logger.info(f'action=send_stop resp={resp["response"]}')
+
+        order_id = resp['response']['parent_order_acceptance_id']
+        order = self.wait_order_complete(order_id)
+        if not order:
+            logger.error('action=send_stop_loss error=timeout')
+            raise OrderTimeoutError
+
+        return self.trade_details(order.product_code, order_id)
+
+    def cancel_stop_loss(self, product_code, order_id):
+        path = '/v1/me/cancelparentorder'
+        resp = self.private.base_post(path=path, product_code=product_code, parent_order_acceptance_id=order_id)
+        if resp['status_code'] >= 400:
+            logger.error(f'action=cancel_stop_loss error={resp["response"]["error_message"]}')
+            return False
+        else:
+            logger.info('action=cancel_stop_loss')
+            return True
 

@@ -74,11 +74,12 @@ class Ticker(object):
 
 
 class Order(object):
-    def __init__(self, product_code, side, units, order_type='MARKET',
+    def __init__(self, product_code, side, units, price=None, order_type='MARKET',
                  order_state=None, filling_transaction_id=None):
         self.product_code = product_code
         self.side = side
         self.units = units
+        self.price = price
         self.order_type = order_type
         self.order_state = order_state
         self.filling_transactionid = filling_transaction_id

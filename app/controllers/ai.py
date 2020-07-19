@@ -1,6 +1,8 @@
 import datetime
+import json
 import logging
 import math
+import requests
 import time
 
 import numpy as np
@@ -147,7 +149,7 @@ class AI(object):
 
     def trade(self):
         logger.info('action=trade status=run')
-
+        self.alert_signal()
         params = self.optimized_trade_params
         if params is None:
             self.update_optimize_params(False)
@@ -189,16 +191,20 @@ class AI(object):
 
             if params.ema_enable and params.ema_period_1 <= i and params.ema_period_2 <= i:
                 if ema_values_1[i - 1] < ema_values_2[i - 1] and ema_values_1[i] >= ema_values_2[i]:
+                    logger.info("ema buy signal")
                     buy_point += 1
 
                 if ema_values_1[i - 1] > ema_values_2[i - 1] and ema_values_1[i] <= ema_values_2[i]:
+                    logger.info("ema sell signal")
                     sell_point += 1
 
             if params.bb_enable and params.bb_n <= i:
                 if bb_down[i - 1] > df.candles[i - 1].close and bb_down[i] <= df.candles[i].close:
+                    logger.info("bb buy signal")
                     buy_point += 1
 
                 if bb_up[i - 1] < df.candles[i - 1].close and bb_up[i] >= df.candles[i].close:
+                    logger.info("bb sell signal")
                     sell_point += 1
 
             if params.ichimoku_enable:
@@ -207,6 +213,7 @@ class AI(object):
                         senkou_a[i] < df.candles[i].low and
                         senkou_b[i] < df.candles[i].low and
                         tenkan[i] > kijun[i]):
+                    logger.info("ichimoku buy signal")
                     buy_point += 1
 
                 if (chikou[i - 1] > df.candles[i - 1].low and
@@ -214,20 +221,25 @@ class AI(object):
                         senkou_a[i] > df.candles[i].high and
                         senkou_b[i] > df.candles[i].high and
                         tenkan[i] < kijun[i]):
+                    logger.info("ichimoku sell signal")
                     sell_point += 1
 
             if params.macd_enable:
                 if macd[i] < 0 and macd_signal[i] < 0 and macd[i - 1] < macd_signal[i - 1] and macd[i] >= macd_signal[i]:
+                    logger.info("MACD buy signal")
                     buy_point += 1
 
                 if macd[i] > 0 and macd_signal[i] > 0 and macd[i-1] > macd_signal[i - 1] and macd[i] <= macd_signal[i]:
+                    logger.info("MACD sell signal")
                     sell_point += 1
 
             if params.rsi_enable and rsi_values[i-1] != 0 and rsi_values[i-1] != 100:
                 if rsi_values[i-1] < params.rsi_buy_thread and rsi_values[i] >= params.rsi_buy_thread:
+                    logger.info("RSI buy signal")
                     buy_point += 1
 
                 if rsi_values[i-1] > params.rsi_sell_thread and rsi_values[i] <= params.rsi_sell_thread:
+                    logger.info("RSI sell signal")
                     sell_point += 1
 
             if not self.in_atr_trade and (buy_point > 0 or
@@ -244,6 +256,7 @@ class AI(object):
                     continue
 
                 self.stop_limit = df.candles[i].close * self.stop_limit_percent
+                logger.info(f"stop limit is {self.stop_limit}")
                 self.trade_list = self.API.get_open_trade()
                 if close_trade:
                     self.update_optimize_params(is_continue=True)
@@ -262,6 +275,7 @@ class AI(object):
                     continue
 
                 self.stop_limit = df.candles[i].close * (2 - self.stop_limit_percent)
+                logger.info(f"stop limit is {self.stop_limit}")
                 self.trade_list = self.API.get_open_trade()
                 if close_trade:
                     self.update_optimize_params(is_continue=True)
@@ -282,6 +296,7 @@ class AI(object):
                         units = math.floor(balance.available * self.stop_limit_percent / (atr_up[i] - atr_down[i]) * 10000) / 10000
                     else:
                         units = int(balance.available * self.stop_limit_percent / (atr_up[i] - atr_down[i]))
+                    logger.info("ATR breaks")
                     could_buy, close_trade = self.buy(df.candles[i], units)
                     if not could_buy:
                         continue
@@ -299,6 +314,7 @@ class AI(object):
                             balance.available * self.stop_limit_percent / (atr_up[i] - atr_down[i]) * 10000) / 10000
                     else:
                         units = int(balance.available * self.stop_limit_percent / (atr_up[i] - atr_down[i]))
+                    logger.info("ATR breaks")
                     could_sell, close_trade = self.sell(df.candles[i], units)
                     if not could_sell:
                         continue
@@ -309,3 +325,167 @@ class AI(object):
                     if close_trade:
                         self.in_atr_trade = False
                         self.update_optimize_params(is_continue=True)
+
+    def alert_signal(self):
+        logger.info('action=alert_signal status=run')
+        for duration in [constants.DURATION_5M, constants.DURATION_15M, constants.DURATION_30M,
+                         constants.DURATION_1H, constants.DURATION_1D]:
+            df = DataFrameCandle(self.product_code, duration)
+            df.set_all_candles(self.past_period)
+
+            ema_values_1 = talib.EMA(np.array(df.closes), 5)
+            ema_values_2 = talib.EMA(np.array(df.closes), 25)
+            ema_values_3 = talib.EMA(np.array(df.closes), 75)
+
+            bb_up, _, bb_down = talib.BBANDS(np.array(df.closes), 20, 2, 2, 0)
+
+            atr = talib.ATR(np.array(df.highs), np.array(df.lows),
+                            np.array(df.closes), 14)
+            mid_list = talib.EMA(np.array(df.closes), 14)
+            atr_up = (mid_list + atr * 2).tolist()
+            atr_down = (mid_list - atr * 2).tolist()
+
+            tenkan, kijun, senkou_a, senkou_b, chikou = ichimoku_cloud(df.closes)
+
+            rsi_values = talib.RSI(np.array(df.closes), 14)
+
+            macd, macd_signal, _ = talib.MACD(np.array(df.closes), 12, 26, 9)
+
+            if 75 <= len(df.candles):
+                if ema_values_1[-2] < ema_values_2[-2] and ema_values_1[-1] >= ema_values_2[-1]:
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f'EMA5 surpassed EMA25; duration: {duration}, product_code: {self.product_code}', # 通知内容
+                        'username': u'Market-Signal-Bot',  # ユーザー名
+                        'icon_emoji': u':smile_cat:',  # アイコン
+                        'link_names': 1,  # 名前をリンク化
+                    }))
+
+                if ema_values_1[-2] > ema_values_2[-2] and ema_values_1[-1] <= ema_values_2[-1]:
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f'EMA5 went below EMA25; duration: {duration}, product_code: {self.product_code}', # 通知内容
+                        'username': u'Market-Signal-Bot',  # ユーザー名
+                        'icon_emoji': u':smile_cat:',  # アイコン
+                        'link_names': 1,  # 名前をリンク化
+                    }))
+
+                if ema_values_1[-2] < ema_values_3[-2] and ema_values_1[-1] >= ema_values_3[-1]:
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f'EMA5 surpassed EMA75; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'username': u'Market-Signal-Bot',  # ユーザー名
+                        'icon_emoji': u':smile_cat:',  # アイコン
+                        'link_names': 1,  # 名前をリンク化
+                    }))
+
+                if ema_values_1[-2] > ema_values_3[-2] and ema_values_1[-1] <= ema_values_3[-1]:
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f'EMA5 went below EMA75; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'username': u'Market-Signal-Bot',  # ユーザー名
+                        'icon_emoji': u':smile_cat:',  # アイコン
+                        'link_names': 1,  # 名前をリンク化
+                    }))
+
+                if ema_values_2[-2] < ema_values_3[-2] and ema_values_2[-1] >= ema_values_3[-1]:
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f'EMA25 surpassed EMA75; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'username': u'Market-Signal-Bot',  # ユーザー名
+                        'icon_emoji': u':smile_cat:',  # アイコン
+                        'link_names': 1,  # 名前をリンク化
+                    }))
+
+                if ema_values_2[-2] > ema_values_3[-2] and ema_values_2[-1] <= ema_values_3[-1]:
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f'EMA25 went below EMA75; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'username': u'Market-Signal-Bot',  # ユーザー名
+                        'icon_emoji': u':smile_cat:',  # アイコン
+                        'link_names': 1,  # 名前をリンク化
+                    }))
+
+            if 20 <= len(df.candles):
+                if bb_down[-2] > df.candles[-2].close and bb_down[-1] <= df.candles[-1].close:
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f'candle stick surpassed BB_Down; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'username': u'Market-Signal-Bot',  # ユーザー名
+                        'icon_emoji': u':smile_cat:',  # アイコン
+                        'link_names': 1,  # 名前をリンク化
+                    }))
+
+                if bb_up[-2] < df.candles[-2].close and bb_up[-1] >= df.candles[-1].close:
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f'candle stick went below BB_Up; duration: {duration}, product_code: {self.product_code}', # 通知内容
+                        'username': u'Market-Signal-Bot',  # ユーザー名
+                        'icon_emoji': u':smile_cat:',  # アイコン
+                        'link_names': 1,  # 名前をリンク化
+                    }))
+
+            if (chikou[-2] < df.candles[-2].high and
+                    chikou[-1] >= df.candles[-1].high and
+                    senkou_a[-1] < df.candles[-1].low and
+                    senkou_b[-1] < df.candles[-1].low and
+                    tenkan[-1] > kijun[-1]):
+                requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                    'text': f'三役好転; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'username': u'Market-Signal-Bot',  # ユーザー名
+                    'icon_emoji': u':smile_cat:',  # アイコン
+                    'link_names': 1,  # 名前をリンク化
+                }))
+
+            if (chikou[-2] > df.candles[-2].low and
+                    chikou[-1] <= df.candles[-1].low and
+                    senkou_a[-1] > df.candles[-1].high and
+                    senkou_b[-1] > df.candles[-1].high and
+                    tenkan[-1] < kijun[-1]):
+                requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                    'text': f'三役逆転; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'username': u'Market-Signal-Bot',  # ユーザー名
+                    'icon_emoji': u':smile_cat:',  # アイコン
+                    'link_names': 1,  # 名前をリンク化
+                }))
+
+            if macd[-1] < 0 and macd_signal[-1] < 0 and macd[-2] < macd_signal[-2] and macd[-1] >= macd_signal[-1]:
+                requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                    'text': f'MACD surpassed MACD signal; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'username': u'Market-Signal-Bot',  # ユーザー名
+                    'icon_emoji': u':smile_cat:',  # アイコン
+                    'link_names': 1,  # 名前をリンク化
+                }))
+
+            if macd[-1] > 0 and macd_signal[-1] > 0 and macd[-2] > macd_signal[-2] and macd[-1] <= macd_signal[-1]:
+                requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                    'text': f'MACD went below MACD signal; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'username': u'Market-Signal-Bot',  # ユーザー名
+                    'icon_emoji': u':smile_cat:',  # アイコン
+                    'link_names': 1,  # 名前をリンク化
+                }))
+
+            if rsi_values[-2] != 0 and rsi_values[-2] != 100:
+                if rsi_values[-2] < 30 and rsi_values[-1] >= 30:
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f'candle stick surpassed RSI 30; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'username': u'Market-Signal-Bot',  # ユーザー名
+                        'icon_emoji': u':smile_cat:',  # アイコン
+                        'link_names': 1,  # 名前をリンク化
+                    }))
+
+                if rsi_values[-2] > 70 and rsi_values[-1] <= 70:
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f'candle stick went below RSI 70; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'username': u'Market-Signal-Bot',  # ユーザー名
+                        'icon_emoji': u':smile_cat:',  # アイコン
+                        'link_names': 1,  # 名前をリンク化
+                    }))
+
+            if atr_up[-2] > df.candles[-2].close and atr_up[-1] <= df.candles[-1].close:
+                requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                    'text': f'candle stick broke ATR Up; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'username': u'Market-Signal-Bot',  # ユーザー名
+                    'icon_emoji': u':smile_cat:',  # アイコン
+                    'link_names': 1,  # 名前をリンク化
+                }))
+
+            if atr_down[-2] < df.candles[-2].close and atr_down[-1] >= df.candles[-1].close:
+                requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                    'text': f'candle stick broke ATR Down; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'username': u'Market-Signal-Bot',  # ユーザー名
+                    'icon_emoji': u':smile_cat:',  # アイコン
+                    'link_names': 1,  # 名前をリンク化
+                }))

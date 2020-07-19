@@ -33,3 +33,5 @@ use_percent = float(conf['pytrading']['use_percent'])
 past_period = int(conf['pytrading']['past_period'])
 stop_limit_percent = float(conf['pytrading']['stop_limit_percent'])
 num_ranking = int(conf['pytrading']['num_ranking'])
+
+WEB_HOOK_URL = conf['slack']['WEB_HOOK_URL']
