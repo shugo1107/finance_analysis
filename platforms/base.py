@@ -8,9 +8,20 @@ logger = logging.getLogger(__name__)
 
 
 class Balance(object):
-    def __init__(self, currency, available):
+    def __init__(self, currency, available, required=None, leverage=25):
         self.currency = currency
         self.available = available
+        self.required = required
+        self.leverage = leverage
+
+
+class Position(object):
+    def __init__(self, product_code, side, unit, require_collateral, leverage=25):
+        self.product_code = product_code
+        self.side = side
+        self.unit = unit
+        self.leverage = leverage
+        self.require_collateral = require_collateral
 
 
 class Ticker(object):

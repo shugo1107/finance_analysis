@@ -1,5 +1,5 @@
 from datetime import datetime
-import simplejson as json
+import json
 import logging
 import requests
 import time
@@ -152,10 +152,7 @@ class APIClient(object):
             while True:
                 if not req.run():
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': u'oanda streaming is temporarily closed',  # 通知内容
-                        'username': u'Market-Signal-Bot',  # ユーザー名
-                        'icon_emoji': u':smile_cat:',  # アイコン
-                        'link_names': 1,  # 名前をリンク化
+                        'text': u'bitflyer websocket is temporarily closed',  # 通知内容
                     }))
                     time.sleep(1)
         except WebSocketProtocolException:
@@ -165,9 +162,6 @@ class APIClient(object):
             if count > 60:
                 requests.post(settings.WEB_HOOK_URL, data=json.dumps({
                     'text': u'bitflyer websocket closed',  # 通知内容
-                    'username': u'Market-Signal-Bot',  # ユーザー名
-                    'icon_emoji': u':smile_cat:',  # アイコン
-                    'link_names': 1,  # 名前をリンク化
                 }))
                 raise WebSocketProtocolException
 
