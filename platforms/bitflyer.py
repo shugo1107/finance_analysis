@@ -97,7 +97,8 @@ class APIClient(object):
 
         available = resp['response']['collateral']
         currency = "JPY"
-        return Balance(currency, available)
+        require_collateral = resp['response']['require_collateral']
+        return Balance(currency, available, require_collateral)
 
     # def get_open_position(self):
     #     req = positions.PositionList(accountID=self.account_id)
@@ -262,12 +263,12 @@ class APIClient(object):
             logger.info(f'action=send_stop resp={resp["response"]}')
 
         order_id = resp['response']['parent_order_acceptance_id']
-        order = self.wait_order_complete(order_id)
-        if not order:
-            logger.error('action=send_stop_loss error=timeout')
-            raise OrderTimeoutError
+        side = order.side
+        price = order.price
+        units = order.units
+        trade = Trade(trade_id=order_id, side=side, price=price, units=units)
 
-        return self.trade_details(order.product_code, order_id)
+        return trade
 
     def cancel_stop_loss(self, product_code, order_id):
         path = '/v1/me/cancelparentorder'

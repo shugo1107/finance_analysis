@@ -56,4 +56,4 @@ class StreamData(object):
 
 
 # singleton
-stream = StreamData()
+# stream = StreamData()

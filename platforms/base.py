@@ -6,20 +6,21 @@ import constants
 
 logger = logging.getLogger(__name__)
 
+#  APIClientクラスをここに作ってクラスメソッドを用意する
+
 
 class Balance(object):
-    def __init__(self, currency, available, required=None, leverage=25):
+    def __init__(self, currency, available, require_collateral=None):
         self.currency = currency
         self.available = available
-        self.required = required
-        self.leverage = leverage
+        self.require_collateral = require_collateral
 
 
 class Position(object):
-    def __init__(self, product_code, side, unit, require_collateral, leverage=25):
+    def __init__(self, product_code, side, units, require_collateral, leverage=25):
         self.product_code = product_code
         self.side = side
-        self.unit = unit
+        self.units = units
         self.leverage = leverage
         self.require_collateral = require_collateral
 

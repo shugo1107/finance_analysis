@@ -45,7 +45,8 @@ class APIClient(object):
 
         available = resp['account']['balance']
         currency = resp['account']['currency']
-        return Balance(currency, available)
+        require_collateral = resp['account']['marginUsed']
+        return Balance(currency, available, require_collateral)
 
     # def get_open_position(self):
     #     req = positions.PositionList(accountID=self.account_id)
@@ -233,31 +234,40 @@ class APIClient(object):
         return trade
 
     def send_stop_loss(self, order: Order) -> Trade:
-        path = '/v1/me/sendparentorder'
-        resp = self.private.base_post(path=path, parameters=[{
-            "product_code": order.product_code, "condition_type": order.order_type, "side": order.side,
-            "trigger_price": order.price, "size": order.units}])
-        if resp['status_code'] >= 400:
-            logger.error(f'action=send_stop error={resp["response"]["error_message"]}')
+        if order.side == constants.BUY:
+            units = order.units
+        elif order.side == constants.SELL:
+            units = -order.units
+        order_data = {
+            'order': {
+                'type': order.order_type,
+                'instrument': order.product_code,
+                'units': units,
+                'price': order.price
+            }
+        }
+        req = orders.OrderCreate(accountID=self.account_id, data=order_data)
+        try:
+            resp = self.client.request(req)
+            logger.info(f'action=send_order resp={resp}')
+        except V20Error as e:
+            logger.error(f'action=send_order error={e}')
             raise ValueError
-        else:
-            logger.info(f'action=send_stop resp={resp["response"]}')
+        order_id = resp['orderCreateTransaction']['id']
+        price = order.price
+        units = order.units
+        side = order.side
+        trade = Trade(trade_id=order_id, side=side, price=price, units=units)
 
-        order_id = resp['response']['parent_order_acceptance_id']
-        order = self.wait_order_complete(order_id)
-        if not order:
-            logger.error('action=send_stop_loss error=timeout')
-            raise OrderTimeoutError
-
-        return self.trade_details(order.product_code, order_id)
+        return trade
 
     def cancel_stop_loss(self, product_code, order_id):
-        path = '/v1/me/cancelparentorder'
-        resp = self.private.base_post(path=path, product_code=product_code, parent_order_acceptance_id=order_id)
-        if resp['status_code'] >= 400:
-            logger.error(f'action=cancel_stop_loss error={resp["response"]["error_message"]}')
-            return False
-        else:
-            logger.info('action=cancel_stop_loss')
+        req = orders.OrderCancel(accountID=self.account_id, orderID=order_id)
+        try:
+            resp = self.client.request(req)
+            logger.info(f'action=send_order resp={resp}')
             return True
+        except V20Error as e:
+            logger.error(f'action=send_order error={e}')
+            return False
 

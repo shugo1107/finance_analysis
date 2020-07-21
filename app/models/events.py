@@ -69,6 +69,8 @@ class SignalEvents(object):
             self.signals = []
         else:
             self.signals = signals
+        self.has_long = False
+        self.has_short = False
 
     def can_buy(self, time):
         if len(self.signals) == 0:
@@ -92,30 +94,42 @@ class SignalEvents(object):
 
     def buy(self, product_code, time, price, units, save):
         if not self.can_buy(time):
-            return False
+            return False, False
 
+        close_trade = False
         signal_event = SignalEvent(
             time=time, product_code=product_code, side=constants.BUY, price=price, units=units)
         if save:
             signal_event.save()
 
         self.signals.append(signal_event)
+        if self.has_short:
+            self.has_short = False
+            close_trade = True
+        else:
+            self.has_long = True
         # requests.post(settings.WEB_HOOK_URL, data=json.dumps({
         #     'text': f'signal event, time: {signal_event.time}, product_code: {signal_event.product_code}, side: {signal_event.side}, price: {signal_event.price}, units: {signal_event.units}',  # 通知内容
         # }))
-        return True
+        return True, close_trade
 
     def sell(self, product_code, time, price, units, save):
         if not self.can_sell(time):
-            return False
+            return False, False
 
+        close_trade = False
         signal_event = SignalEvent(
             time=time, product_code=product_code, side=constants.SELL, price=price, units=units)
         if save:
             signal_event.save()
 
         self.signals.append(signal_event)
-        return True
+        if self.has_long:
+            self.has_long = False
+            close_trade = True
+        else:
+            self.has_short = True
+        return True, close_trade
 
     @staticmethod
     def get_signal_events_by_count(count: int):
