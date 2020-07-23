@@ -307,7 +307,7 @@ class DataFrameCandle(object):
 
         return performance, best_n, best_k
 
-    def back_test_atr(self, n: int, k: float):
+    def back_test_atr(self, n: int, k_1: float, k_2: float):
         if len(self.candles) <= n:
             return None
 
@@ -315,38 +315,60 @@ class DataFrameCandle(object):
         atr = talib.ATR(
             np.array(self.highs), np.array(self.lows), np.array(self.closes), n)
         mid_list = nan_to_zero(talib.EMA(np.asarray(self.closes), n))
-        up_list = (mid_list + nan_to_zero(atr) * k).tolist()
-        down_list = (mid_list - nan_to_zero(atr) * k).tolist()
+        up_list = (mid_list + nan_to_zero(atr) * k_1).tolist()
+        down_list = (mid_list - nan_to_zero(atr) * k_1).tolist()
+        up_list_2 = (mid_list + nan_to_zero(atr) * k_2).tolist()
+        down_list_2 = (mid_list - nan_to_zero(atr) * k_2).tolist()
+        has_long_position = False
+        has_short_position = False
+        buy_stop_loss = 0
+        sell_stop_loss = 1000000000
 
         for i in range(1, len(self.candles)):
             if i < n:
                 continue
 
+            if has_long_position and self.candles[i].low < buy_stop_loss:
+                signal_events.sell(product_code=self.product_code, time=self.candles[i].time, price=buy_stop_loss, units=1.0, save=False)
+                has_long_position = False
+                buy_stop_loss = 1000000000
+
+            if has_short_position and self.candles[i].high > sell_stop_loss:
+                signal_events.buy(product_code=self.product_code, time=self.candles[i].time, price=sell_stop_loss, units=1.0, save=False)
+                has_short_position = False
+                sell_stop_loss = 0
+
             if up_list[i-1] > self.candles[i-1].close and up_list[i] <= self.candles[i].close:
                 signal_events.buy(product_code=self.product_code, time=self.candles[i].time, price=self.candles[i].close, units=1.0, save=False)
+                has_long_position = True
+                buy_stop_loss = up_list_2[i]
 
             if down_list[i-1] < self.candles[i-1].close and down_list[i] >= self.candles[i].close:
                 signal_events.sell(product_code=self.product_code, time=self.candles[i].time, price=self.candles[i].close, units=1.0, save=False)
+                has_short_position = True
+                sell_stop_loss = down_list_2[i]
 
         return signal_events
 
     def optimize_atr(self):
         performance = 0
         best_n = 14
-        best_k = 2.0
+        best_k_1 = 2.0
 
-        for n in range(5, 20):
-            for k in np.arange(1.5, 3.0, 0.1):
-                signal_events = self.back_test_atr(n, k)
-                if signal_events is None:
-                    continue
-                profit = signal_events.profit
-                if performance < profit:
-                    performance = profit
-                    best_n = n
-                    best_k = k
+        for n in range(7, 17):
+            for k_1 in np.arange(1.5, 3.0, 0.1):
+                for k_2 in np.arange(-1.0, 1.0, 0.1):
+                    signal_events = self.back_test_atr(n, k_1, k_2)
+                    if signal_events is None:
+                        continue
+                    profit = signal_events.profit
+                    if performance < profit:
+                        performance = profit
+                        best_n = n
+                        best_k_1 = k_1
+                        best_k_2 = k_2
 
-        return performance, best_n, best_k
+        return performance, best_n, best_k_1, best_k_2
 
     def back_test_ichimoku(self):
         if len(self.candles) <= 52:
@@ -458,7 +480,7 @@ class DataFrameCandle(object):
     def optimize_params(self):
         ema_performance, ema_period_1, ema_period_2 = self.optimize_ema()
         bb_performance, bb_n, bb_k = self.optimize_bb()
-        atr_performance, atr_n, atr_k = self.optimize_atr()
+        atr_performance, atr_n, atr_k_1, atr_k_2 = self.optimize_atr()
         ichimoku_performance = self.optimize_ichimoku()
         rsi_performance, rsi_period, rsi_buy_thread, rsi_sell_thread = self.optimize_rsi()
         macd_performance, macd_fast_period, macd_slow_period, macd_signal_period = self.optimize_macd()
@@ -489,7 +511,8 @@ class DataFrameCandle(object):
             'bb_k': bb_k,
             'atr_enable': atr_ranking.enable,
             'atr_n': atr_n,
-            'atr_k': atr_k,
+            'atr_k_1': atr_k_1,
+            'atr_k_2': atr_k_2,
             'ichimoku_enable': ichimoku_ranking.enable,
             'rsi_enable': rsi_ranking.enable,
             'rsi_period': rsi_period,

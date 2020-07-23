@@ -224,217 +224,239 @@ class AI(object):
     def trade(self):
         logger.info('action=trade status=run')
         self.alert_signal()
-        self.trade_back_test()
-        self.position = self.get_current_position()
-        params = self.optimized_trade_params
-        if params is None:
-            self.update_optimize_params(False)
-            return
+        if self.back_test:
+            self.trade_back_test()
+        else:
+            self.position = self.get_current_position()
+            logger.info(f"position units: {self.position.units}")
+            if self.in_atr_trade and self.position.units <= 0.01:
+                self.in_atr_trade = False
+                self.atr_trade = None
+                self.atr_buy_stop_limit = 0
+                self.atr_sell_stop_limit = 1000000000
+                self.update_optimize_params(is_continue=True)
+            params = self.optimized_trade_params
+            if params is None:
+                self.update_optimize_params(False)
+                return
 
-        df = DataFrameCandle(self.product_code, self.duration)
-        df.set_all_candles(self.past_period)
+            df = DataFrameCandle(self.product_code, self.duration)
+            df.set_all_candles(self.past_period)
 
-        if params.ema_enable:
-            ema_values_1 = talib.EMA(np.array(df.closes), params.ema_period_1)
-            ema_values_2 = talib.EMA(np.array(df.closes), params.ema_period_2)
+            if params.ema_enable:
+                ema_values_1 = talib.EMA(np.array(df.closes), params.ema_period_1)
+                ema_values_2 = talib.EMA(np.array(df.closes), params.ema_period_2)
 
-        if params.bb_enable:
-            bb_up, _, bb_down = talib.BBANDS(np.array(df.closes), params.bb_n, params.bb_k, params.bb_k, 0)
+            if params.bb_enable:
+                bb_up, _, bb_down = talib.BBANDS(np.array(df.closes), params.bb_n, params.bb_k, params.bb_k, 0)
 
-        atr = talib.ATR(
-            np.array(df.highs), np.array(df.lows),
-            np.array(df.closes), params.atr_n)
-        mid_list = talib.EMA(np.array(df.closes), params.atr_n)
-        atr_up = (mid_list + atr * params.atr_k).tolist()
-        atr_down = (mid_list - atr * params.atr_k).tolist()
-        if atr_up[-1] < self.atr_sell_stop_limit:
-            self.atr_sell_stop_limit = atr_up[-1]
-            if self.in_atr_trade and self.position.side == constants.SELL and self.position.units > 0:
-                if self.cancel_stop_loss(self.product_code, self.atr_trade):
-                    trade = self.send_stop_loss(self.atr_trade.units, self.atr_trade.side, self.atr_trade.price)
-                    self.atr_trade = trade
-        if atr_down[-1] > self.atr_buy_stop_limit:
-            self.atr_buy_stop_limit = atr_down[-1]
-            if self.in_atr_trade and self.position.side == constants.BUY and self.position.units > 0:
-                if self.cancel_stop_loss(self.product_code, self.atr_trade):
-                    trade = self.send_stop_loss(self.atr_trade.units, self.atr_trade.side, self.atr_trade.price)
-                    self.atr_trade = trade
-
-        if params.ichimoku_enable:
-            tenkan, kijun, senkou_a, senkou_b, chikou = ichimoku_cloud(df.closes)
-
-        if params.rsi_enable:
-            rsi_values = talib.RSI(np.array(df.closes), params.rsi_period)
-
-        if params.macd_enable:
-            macd, macd_signal, _ = talib.MACD(np.array(df.closes), params.macd_fast_period, params.macd_slow_period, params.macd_signal_period)
-
-        atr_buy_point, atr_sell_point = 0, 0
-        if params.atr_enable and params.atr_n <= len(df.candles):
-            if atr_up[-2] > df.candles[-2].close and atr_up[-1] <= df.candles[-1].close:
-                atr_buy_point += 1
-
-            if atr_down[-2] < df.candles[-2].close and atr_down[-1] >= df.candles[-1].close:
-                atr_sell_point += 1
-
-        if atr_buy_point > 0 or self.atr_sell_stop_limit < df.candles[-1].close:
-            if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
-                can_buy_units = math.floor(
-                    self.balance.available * self.leverage * 0.8 / df.candles[-1].close * 10000) / 10000
+            atr = talib.ATR(
+                np.array(df.highs), np.array(df.lows),
+                np.array(df.closes), params.atr_n)
+            mid_list = talib.EMA(np.array(df.closes), params.atr_n)
+            atr_up = (mid_list + atr * params.atr_k_1).tolist()
+            atr_down = (mid_list - atr * params.atr_k_1).tolist()
+            atr_up_2 = (mid_list + atr * params.atr_k_2).tolist()
+            atr_down_2 = (mid_list - atr * params.atr_k_2).tolist()
+            mid_atr = math.floor((atr_up[-1] + atr_down[-1]) / 2)
+            if atr_down_2[-1] < self.atr_sell_stop_limit:
+                self.atr_sell_stop_limit = math.floor(atr_down_2[-1])
+                if self.in_atr_trade and self.atr_trade.side == constants.BUY:
+                    if self.cancel_stop_loss(self.product_code, self.atr_trade.trade_id):
+                        trade = self.send_stop_loss(self.position.units, self.atr_trade.side, self.atr_sell_stop_limit)
+                        self.atr_trade = trade
+                        logger.info('stop loss is updated!')
+            if atr_up_2[-1] > self.atr_buy_stop_limit:
+                self.atr_buy_stop_limit = math.floor(atr_up_2[-1])
+                if self.in_atr_trade and self.atr_trade.side == constants.SELL:
+                    if self.cancel_stop_loss(self.product_code, self.atr_trade.trade_id):
+                        trade = self.send_stop_loss(self.position.units, self.atr_trade.side, self.atr_buy_stop_limit)
+                        self.atr_trade = trade
+                        logger.info('stop loss is updated!')
+            logger.info(f'sell stop: {self.atr_sell_stop_limit}, buy stop: {self.atr_buy_stop_limit}, mid atr:{mid_atr}')
+            if self.atr_trade is not None:
+                logger.info(f"in atr: {self.in_atr_trade}, atr trade side: {self.atr_trade.side}")
             else:
-                can_buy_units = math.floor(self.balance.available * self.leverage * 0.8 / df.candles[-1].close)
-            if self.position.side == constants.SELL and self.position.units > 0 and self.in_atr_trade:
-                units = self.position.units
-            else:
+                logger.info("atr trade is None!")
+
+            if params.ichimoku_enable:
+                tenkan, kijun, senkou_a, senkou_b, chikou = ichimoku_cloud(df.closes)
+
+            if params.rsi_enable:
+                rsi_values = talib.RSI(np.array(df.closes), params.rsi_period)
+
+            if params.macd_enable:
+                macd, macd_signal, _ = talib.MACD(np.array(df.closes), params.macd_fast_period, params.macd_slow_period, params.macd_signal_period)
+
+            atr_buy_point, atr_sell_point = 0, 0
+            logger.info(f"atr_up: {atr_up[-1]}, atr_down; {atr_down[-1]}, current price: {df.candles[-1].close}")
+            if params.atr_n <= len(df.candles):
+                # if atr_up[-2] > df.candles[-2].close and atr_up[-1] <= df.candles[-1].close:
+                if atr_up[-1] <= df.candles[-1].close:
+                    atr_buy_point += 1
+
+                # if atr_down[-2] < df.candles[-2].close and atr_down[-1] >= df.candles[-1].close:
+                if atr_down[-1] >= df.candles[-1].close:
+                    atr_sell_point += 1
+
+            logger.info(f"atr_buy_point: {atr_buy_point}, atr_sell_point; {atr_sell_point}")
+            if atr_buy_point > 0:
+                if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
+                    can_buy_units = math.floor(
+                        self.balance.available * self.leverage * 0.8 / df.candles[-1].close * 10000) / 10000
+                else:
+                    can_buy_units = math.floor(self.balance.available * self.leverage * 0.8 / df.candles[-1].close)
+
                 if self.position.side == constants.BUY:
                     current_units = self.position.units
                 else:
                     current_units = -self.position.units
                 if self.product_code == "FX_BTC_JPY":
                     want_to_buy_units = math.floor(
-                        self.balance.available * (1 - self.stop_limit_percent) / (atr_up[-1] - atr_down[-1]) * 10000) / 10000
+                        self.balance.available * (1 - self.stop_limit_percent) / (df.candles[-1].close - mid_atr) * 10000) / 10000
                 else:
                     want_to_buy_units = math.floor(
-                        self.balance.available * (1 - self.stop_limit_percent) / (atr_up[-1] - atr_down[-1]))
+                        self.balance.available * (1 - self.stop_limit_percent) / (df.candles[-1].close - mid_atr))
                 max_units = min(want_to_buy_units, can_buy_units)
                 units = max_units - current_units
-            logger.info("ATR breaks")
-            if units < 0.01:
-                logger.info(f"action=atr_buy error=units is too little units={units}")
-            else:
-                _, close_trade = self.buy(df.candles[-1], units)
-
-                self.in_atr_trade = True
-                self.atr_buy_stop_limit = atr_down[-1]
-
-                if close_trade:
-                    self.in_atr_trade = False
-                    self.atr_trade = None
-                    self.atr_buy_stop_limit = 0
-                    self.atr_sell_stop_limit = 1000000000
-                    self.update_optimize_params(is_continue=True)
+                if units < 0:
+                    units = 0
+                logger.info("ATR breaks up")
+                if units < 0.01:
+                    logger.info(f"action=atr_buy error=units is too little units={units}, max units={max_units}, current units={current_units}")
                 else:
-                    self.atr_trade = self.send_stop_loss(max_units, constants.SELL, self.atr_buy_stop_limit)
+                    logger.info(f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}")
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}",  # 通知内容
+                    }))
+                    could_buy, close_trade = self.buy(df.candles[-1], units)
 
-        if atr_sell_point > 0 or self.atr_buy_stop_limit > df.candles[-1].close:
-            if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
-                can_sell_units = math.floor(
-                    self.balance.available * self.leverage * 0.8 / df.candles[-1].close * 10000) / 10000
-            else:
-                can_sell_units = math.floor(self.balance.available * self.leverage * 0.8 / df.candles[-1].close)
-            if self.position.side == constants.BUY and self.position.units > 0 and self.in_atr_trade:
-                units = self.position.units
-            else:
+                    if could_buy:
+                        self.in_atr_trade = True
+                        self.atr_buy_stop_limit = mid_atr
+                        logger.info(f'stop limit={self.atr_buy_stop_limit}')
+
+                        self.atr_trade = self.send_stop_loss(max_units, constants.SELL, self.atr_buy_stop_limit)
+
+            if atr_sell_point > 0:
+                if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
+                    can_sell_units = math.floor(
+                        self.balance.available * self.leverage * 0.8 / df.candles[-1].close * 10000) / 10000
+                else:
+                    can_sell_units = math.floor(self.balance.available * self.leverage * 0.8 / df.candles[-1].close)
+
                 if self.position.side == constants.SELL:
-                    current_units = -self.position.units
-                else:
                     current_units = self.position.units
+                else:
+                    current_units = -self.position.units
                 if self.product_code == "FX_BTC_JPY":
                     want_to_sell_units = math.floor(
-                        self.balance.available * (1 - self.stop_limit_percent) / (atr_up[-1] - atr_down[-1]) * 10000) / 10000
+                        self.balance.available * (1 - self.stop_limit_percent) / (mid_atr - df.candles[-1].close) * 10000) / 10000
                 else:
                     want_to_sell_units = math.floor(
-                        self.balance.available * (1 - self.stop_limit_percent) / (atr_up[-1] - atr_down[-1]))
+                        self.balance.available * (1 - self.stop_limit_percent) / (mid_atr - df.candles[-1].close))
                 max_units = min(want_to_sell_units, can_sell_units)
                 units = max_units - current_units
-            logger.info("ATR breaks")
-            _, close_trade = self.sell(df.candles[-1], units)
+                logger.info("ATR breaks down")
+                if units < 0.01:
+                    logger.info(f"action=atr_buy error=units is too little units={units}, max units={max_units}, current units={current_units}")
+                else:
+                    logger.info(f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}")
+                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                        'text': f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}",  # 通知内容
+                    }))
+                    could_sell, close_trade = self.sell(df.candles[-1], units)
 
-            self.in_atr_trade = True
-            self.atr_sell_stop_limit = atr_up[-1]
+                    if could_sell:
+                        self.in_atr_trade = True
+                        self.atr_sell_stop_limit = mid_atr
+                        logger.info(f'stop limit={self.atr_sell_stop_limit}')
 
-            if close_trade:
-                self.in_atr_trade = False
-                self.atr_trade = None
-                self.atr_buy_stop_limit = 0
-                self.atr_sell_stop_limit = 1000000000
-                self.update_optimize_params(is_continue=True)
-            else:
-                self.atr_trade = self.send_stop_loss(max_units, constants.BUY, self.atr_sell_stop_limit)
+                        self.atr_trade = self.send_stop_loss(max_units, constants.BUY, self.atr_sell_stop_limit)
 
-        buy_point, sell_point = 0, 0
+            buy_point, sell_point = 0, 0
 
-        if params.ema_enable and params.ema_period_1 <= len(df.candles) and params.ema_period_2 <= len(df.candles):
-            if ema_values_1[-2] < ema_values_2[-2] and ema_values_1[-1] >= ema_values_2[-1]:
-                logger.info("ema buy signal")
-                buy_point += 1
+            if params.ema_enable and params.ema_period_1 <= len(df.candles) and params.ema_period_2 <= len(df.candles):
+                if ema_values_1[-2] < ema_values_2[-2] and ema_values_1[-1] >= ema_values_2[-1]:
+                    logger.info("ema buy signal")
+                    buy_point += 1
 
-            if ema_values_1[-2] > ema_values_2[-2] and ema_values_1[-1] <= ema_values_2[-1]:
-                logger.info("ema sell signal")
-                sell_point += 1
+                if ema_values_1[-2] > ema_values_2[-2] and ema_values_1[-1] <= ema_values_2[-1]:
+                    logger.info("ema sell signal")
+                    sell_point += 1
 
-        if params.bb_enable and params.bb_n <= len(df.candles):
-            if bb_down[-2] > df.candles[-2].close and bb_down[-1] <= df.candles[-1].close:
-                logger.info("bb buy signal")
-                buy_point += 1
+            if params.bb_enable and params.bb_n <= len(df.candles):
+                if bb_down[-2] > df.candles[-2].close and bb_down[-1] <= df.candles[-1].close:
+                    logger.info("bb buy signal")
+                    buy_point += 1
 
-            if bb_up[-2] < df.candles[-2].close and bb_up[-1] >= df.candles[-1].close:
-                logger.info("bb sell signal")
-                sell_point += 1
+                if bb_up[-2] < df.candles[-2].close and bb_up[-1] >= df.candles[-1].close:
+                    logger.info("bb sell signal")
+                    sell_point += 1
 
-        if params.ichimoku_enable:
-            if (chikou[-2] < df.candles[-2].high and
-                    chikou[-1] >= df.candles[-1].high and
-                    senkou_a[-1] < df.candles[-1].low and
-                    senkou_b[-1] < df.candles[-1].low and
-                    tenkan[-1] > kijun[-1]):
-                logger.info("ichimoku buy signal")
-                buy_point += 1
+            if params.ichimoku_enable:
+                if (chikou[-2] < df.candles[-2].high and
+                        chikou[-1] >= df.candles[-1].high and
+                        senkou_a[-1] < df.candles[-1].low and
+                        senkou_b[-1] < df.candles[-1].low and
+                        tenkan[-1] > kijun[-1]):
+                    logger.info("ichimoku buy signal")
+                    buy_point += 1
 
-            if (chikou[-2] > df.candles[-2].low and
-                    chikou[-1] <= df.candles[-1].low and
-                    senkou_a[-1] > df.candles[-1].high and
-                    senkou_b[-1] > df.candles[-1].high and
-                    tenkan[-1] < kijun[-1]):
-                logger.info("ichimoku sell signal")
-                sell_point += 1
+                if (chikou[-2] > df.candles[-2].low and
+                        chikou[-1] <= df.candles[-1].low and
+                        senkou_a[-1] > df.candles[-1].high and
+                        senkou_b[-1] > df.candles[-1].high and
+                        tenkan[-1] < kijun[-1]):
+                    logger.info("ichimoku sell signal")
+                    sell_point += 1
 
-        if params.macd_enable:
-            if macd[-1] < 0 and macd_signal[-1] < 0 and macd[-2] < macd_signal[-2] and macd[-1] >= macd_signal[-1]:
-                logger.info("MACD buy signal")
-                buy_point += 1
+            if params.macd_enable:
+                if macd[-1] < 0 and macd_signal[-1] < 0 and macd[-2] < macd_signal[-2] and macd[-1] >= macd_signal[-1]:
+                    logger.info("MACD buy signal")
+                    buy_point += 1
 
-            if macd[-1] > 0 and macd_signal[-1] > 0 and macd[-2] > macd_signal[-2] and macd[-1] <= macd_signal[-1]:
-                logger.info("MACD sell signal")
-                sell_point += 1
+                if macd[-1] > 0 and macd_signal[-1] > 0 and macd[-2] > macd_signal[-2] and macd[-1] <= macd_signal[-1]:
+                    logger.info("MACD sell signal")
+                    sell_point += 1
 
-        if params.rsi_enable and rsi_values[-2] != 0 and rsi_values[-1] != 100:
-            if rsi_values[-2] < params.rsi_buy_thread and rsi_values[-1] >= params.rsi_buy_thread:
-                logger.info("RSI buy signal")
-                buy_point += 1
+            if params.rsi_enable and rsi_values[-2] != 0 and rsi_values[-1] != 100:
+                if rsi_values[-2] < params.rsi_buy_thread and rsi_values[-1] >= params.rsi_buy_thread:
+                    logger.info("RSI buy signal")
+                    buy_point += 1
 
-            if rsi_values[-2] > params.rsi_sell_thread and rsi_values[-1] <= params.rsi_sell_thread:
-                logger.info("RSI sell signal")
-                sell_point += 1
+                if rsi_values[-2] > params.rsi_sell_thread and rsi_values[-1] <= params.rsi_sell_thread:
+                    logger.info("RSI sell signal")
+                    sell_point += 1
 
-        if not self.in_atr_trade and (buy_point > 0 or
-                                      (len(self.trade_list) > 1 and self.stop_limit < df.candles[-1].close)):
+            if not self.in_atr_trade and (buy_point > 0 or
+                                          (len(self.trade_list) > 1 and self.stop_limit < df.candles[-1].close)):
 
-            if self.product_code == "FX_BTC_JPY":
-                use_balance = self.balance.available * settings.use_percent
-                units = math.floor((use_balance / df.candles[-1].close) * 10000) / 10000
-            else:
-                units = int(float(self.balance.available) * self.use_percent / df.candles[-1].close)
-            could_buy, close_trade = self.buy(df.candles[-1], units)
-            if could_buy:
-                self.stop_limit = df.candles[-1].close * self.stop_limit_percent
-                logger.info(f"stop limit is {self.stop_limit}")
-                if close_trade:
-                    self.update_optimize_params(is_continue=True)
+                if self.product_code == "FX_BTC_JPY":
+                    use_balance = self.balance.available * settings.use_percent
+                    units = math.floor((use_balance / df.candles[-1].close) * 10000) / 10000
+                else:
+                    units = int(float(self.balance.available) * self.use_percent / df.candles[-1].close)
+                could_buy, close_trade = self.buy(df.candles[-1], units)
+                if could_buy:
+                    self.stop_limit = df.candles[-1].close * self.stop_limit_percent
+                    logger.info(f"stop limit is {self.stop_limit}")
+                    if close_trade:
+                        self.update_optimize_params(is_continue=True)
 
-        if not self.in_atr_trade and (sell_point > 0 or
-                                      (len(self.trade_list) > 1 and self.stop_limit > df.candles[-1].close)):
-            if self.product_code == "FX_BTC_JPY":
-                use_balance = self.balance.available * settings.use_percent
-                units = math.floor((use_balance / df.candles[-1].close) * 10000) / 10000
-            else:
-                units = int(float(self.balance.available) * self.use_percent / df.candles[-1].close)
-            could_sell, close_trade = self.sell(df.candles[-1], units)
-            if could_sell:
-                self.stop_limit = df.candles[-1].close * (2 - self.stop_limit_percent)
-                logger.info(f"stop limit is {self.stop_limit}")
-                if close_trade:
-                    self.update_optimize_params(is_continue=True)
+            if not self.in_atr_trade and (sell_point > 0 or
+                                          (len(self.trade_list) > 1 and self.stop_limit > df.candles[-1].close)):
+                if self.product_code == "FX_BTC_JPY":
+                    use_balance = self.balance.available * settings.use_percent
+                    units = math.floor((use_balance / df.candles[-1].close) * 10000) / 10000
+                else:
+                    units = int(float(self.balance.available) * self.use_percent / df.candles[-1].close)
+                could_sell, close_trade = self.sell(df.candles[-1], units)
+                if could_sell:
+                    self.stop_limit = df.candles[-1].close * (2 - self.stop_limit_percent)
+                    logger.info(f"stop limit is {self.stop_limit}")
+                    if close_trade:
+                        self.update_optimize_params(is_continue=True)
 
     def trade_back_test(self):
         logger.info('action=back_test status=run')
@@ -462,12 +484,14 @@ class AI(object):
             np.array(df.highs), np.array(df.lows),
             np.array(df.closes), params.atr_n)
         mid_list = talib.EMA(np.array(df.closes), params.atr_n)
-        atr_up = (mid_list + atr * params.atr_k).tolist()
-        atr_down = (mid_list - atr * params.atr_k).tolist()
-        if atr_up[-1] < self.atr_sell_stop_limit:
-            self.atr_sell_stop_limit = atr_up[-1]
-        if atr_down[-1] > self.atr_buy_stop_limit:
-            self.atr_buy_stop_limit = atr_down[-1]
+        atr_up = (mid_list + atr * params.atr_k_1).tolist()
+        atr_down = (mid_list - atr * params.atr_k_1).tolist()
+        atr_up_2 = (mid_list + atr * params.atr_k_2).tolist()
+        atr_down_2 = (mid_list - atr * params.atr_k_2).tolist()
+        if atr_up_2[-1] > back_test_atr_buy_stop_limit:
+            back_test_atr_buy_stop_limit = atr_up_2[-1]
+        if atr_down_2[-1] > back_test_atr_sell_stop_limit:
+            back_test_atr_sell_stop_limit = atr_down_2[-1]
 
         if params.ichimoku_enable:
             tenkan, kijun, senkou_a, senkou_b, chikou = ichimoku_cloud(df.closes)
@@ -635,16 +659,16 @@ class AI(object):
                         'text': f'EMA25 went below EMA75; duration: {duration}, product_code: {self.product_code}',  # 通知内容
                     }))
 
-            if 20 <= len(df.candles):
-                if bb_down[-2] > df.candles[-2].close and bb_down[-1] <= df.candles[-1].close:
-                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f'candle stick surpassed BB_Down; duration: {duration}, product_code: {self.product_code}',  # 通知内容
-                    }))
-
-                if bb_up[-2] < df.candles[-2].close and bb_up[-1] >= df.candles[-1].close:
-                    requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f'candle stick went below BB_Up; duration: {duration}, product_code: {self.product_code}', # 通知内容
-                    }))
+            # if 20 <= len(df.candles):
+            #     if bb_down[-2] > df.candles[-2].close and bb_down[-1] <= df.candles[-1].close:
+            #         requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+            #             'text': f'candle stick surpassed BB_Down; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+            #         }))
+            #
+            #     if bb_up[-2] < df.candles[-2].close and bb_up[-1] >= df.candles[-1].close:
+            #         requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+            #             'text': f'candle stick went below BB_Up; duration: {duration}, product_code: {self.product_code}', # 通知内容
+            #         }))
 
             if (chikou[-2] < df.candles[-2].high and
                     chikou[-1] >= df.candles[-1].high and

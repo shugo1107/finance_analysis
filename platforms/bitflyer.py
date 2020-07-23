@@ -257,6 +257,7 @@ class APIClient(object):
             "product_code": order.product_code, "condition_type": order.order_type, "side": order.side,
             "trigger_price": order.price, "size": order.units}])
         if resp['status_code'] >= 400:
+            logger.error(f'action=send_stop order content={order.product_code}, {order.order_type}, {order.units}, {order.price}, {order.side}')
             logger.error(f'action=send_stop error={resp["response"]["error_message"]}')
             raise ValueError
         else:
@@ -277,7 +278,7 @@ class APIClient(object):
             logger.error(f'action=cancel_stop_loss error={resp["response"]["error_message"]}')
             return False
         else:
-            logger.info('action=cancel_stop_loss')
+            logger.info(f'action=cancel_stop_loss resp={resp}')
             return True
     #
     # def trade_close(self, trade_id) -> Trade:
