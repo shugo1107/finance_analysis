@@ -7,6 +7,7 @@ from app.controllers.webserver import start
 import settings
 
 
+# logging.basicConfig(filename='logfile/logger.log', level=logging.INFO)
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
 

@@ -331,12 +331,18 @@ class DataFrameCandle(object):
             if has_long_position and self.candles[i].low < buy_stop_loss:
                 signal_events.sell(product_code=self.product_code, time=self.candles[i].time, price=buy_stop_loss, units=1.0, save=False)
                 has_long_position = False
-                buy_stop_loss = 1000000000
+                buy_stop_loss = 0
 
             if has_short_position and self.candles[i].high > sell_stop_loss:
                 signal_events.buy(product_code=self.product_code, time=self.candles[i].time, price=sell_stop_loss, units=1.0, save=False)
                 has_short_position = False
-                sell_stop_loss = 0
+                sell_stop_loss = 1000000000
+
+            if has_long_position:
+                buy_stop_loss = max(buy_stop_loss, up_list_2[i])
+
+            if has_short_position:
+                sell_stop_loss = min(sell_stop_loss, down_list_2[i])
 
             if up_list[i-1] > self.candles[i-1].close and up_list[i] <= self.candles[i].close:
                 signal_events.buy(product_code=self.product_code, time=self.candles[i].time, price=self.candles[i].close, units=1.0, save=False)
@@ -354,6 +360,7 @@ class DataFrameCandle(object):
         performance = 0
         best_n = 14
         best_k_1 = 2.0
+        best_k_2 = 0.0
 
         for n in range(7, 17):
             for k_1 in np.arange(1.5, 3.0, 0.1):

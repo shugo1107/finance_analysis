@@ -157,5 +157,10 @@ def api_make_handler():
 
 
 def start():
+    # from argparse import ArgumentParser
+    # parser = ArgumentParser()
+    # parser.add_argument('-p', '--port', default=8000, type=int, help='port to listen on')
+    # args = parser.parse_args()
+    # port = args.port
     # app.run(host='127.0.0.1', port=settings.web_port, threaded=True)
     app.run(host='0.0.0.0', port=settings.web_port, threaded=True)

@@ -86,6 +86,9 @@ class AI(object):
             self.optimized_trade_params = df.optimize_params()
         if self.optimized_trade_params is not None:
             logger.info(f'action=update_optimize_params params={self.optimized_trade_params.__dict__}')
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f"optimized_params={self.optimized_trade_params.__dict__}",
+            }))
 
         if is_continue and self.optimized_trade_params is None:
             time.sleep(10 * duration_seconds(self.duration))
@@ -101,12 +104,21 @@ class AI(object):
                 buy_unit += self.trade_list[i].units
             elif self.trade_list[i].side == constants.SELL:
                 sell_unit += self.trade_list[i].units
+        units = abs(buy_unit - sell_unit)
+        if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
+            units = math.ceil(units * 10000) / 10000
+        else:
+            units = math.ceil(units)
         if buy_unit >= sell_unit:
             position = Position(product_code=self.product_code, side=constants.BUY, leverage=self.leverage,
-                                units=buy_unit - sell_unit, require_collateral=self.balance.require_collateral)
+                                units=units, require_collateral=self.balance.require_collateral)
         else:
             position = Position(product_code=self.product_code, side=constants.SELL, leverage=self.leverage,
-                                units=sell_unit - buy_unit, require_collateral=self.balance.require_collateral)
+                                units=units, require_collateral=self.balance.require_collateral)
+        requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+            'text': f"current position product code: {position.product_code}, units: {position.units}, side: {position.side}",  # 通知内容
+        }))
+
         return position
 
     def can_buy(self, candle, units):
@@ -168,13 +180,25 @@ class AI(object):
                     closed_trade = self.API.trade_close(trade.trade_id)
                     sum_price += closed_trade.price * abs(closed_trade.units)
                     closed_units += abs(closed_trade.units)
+                elif self.client == 'bitflyer':
+                    closed_units += trade.units
 
-        order = Order(self.product_code, constants.BUY, units - closed_units)
+        if self.client == 'oanda':
+            new_units = round(units - closed_units)
+
+        if self.client == 'bitflyer':
+            closed_units = round(closed_units, 4)
+            close_order = Order(self.product_code, constants.BUY, closed_units)
+            close_trade = self.API.send_order(close_order)
+            self.signal_events.buy(self.product_code, candle.time, close_trade, closed_units, save=True)
+            sum_price = close_trade.price * closed_units
+            new_units = round(units - closed_units, 4)
+
+        order = Order(self.product_code, constants.BUY, new_units)
         trade = self.API.send_order(order)
-        could_buy, _ = self.signal_events.buy(
-            self.product_code, candle.time,
-            (trade.price * (units - closed_units) + sum_price) / units, units, save=True)
-        return could_buy, close_trade
+        self.signal_events.buy(self.product_code, candle.time,
+                               (trade.price * (units - closed_units) + sum_price) / units, units, save=True)
+        return True, close_trade
 
     def sell(self, candle, units, back_test=False):
         close_trade = False
@@ -199,13 +223,25 @@ class AI(object):
                     closed_trade = self.API.trade_close(trade.trade_id)
                     sum_price += closed_trade.price * abs(closed_trade.units)
                     closed_units += abs(closed_trade.units)
+                elif self.client == 'bitflyer':
+                    closed_units += trade.units
 
-        order = Order(self.product_code, constants.SELL, units - closed_units)
+            if self.client == 'oanda':
+                new_units = round(units - closed_units)
+
+            if self.client == 'bitflyer':
+                closed_units = round(closed_units, 4)
+                close_order = Order(self.product_code, constants.SELL, closed_units)
+                close_trade = self.API.send_order(close_order)
+                self.signal_events.sell(self.product_code, candle.time, close_trade, closed_units, save=True)
+                sum_price = close_trade.price * closed_units
+                new_units = round(units - closed_units, 4)
+
+        order = Order(self.product_code, constants.SELL, new_units)
         trade = self.API.send_order(order)
-        could_sell, _ = self.signal_events.sell(
-            self.product_code, candle.time,
-            (trade.price * (units - closed_units) + sum_price) / units, units, save=True)
-        return could_sell, close_trade
+        self.signal_events.sell(self.product_code, candle.time,
+                                (trade.price * (units - closed_units) + sum_price) / units, units, save=True)
+        return True, close_trade
 
     def send_stop_loss(self, units, side, price):
         order = Order(self.product_code, side, units, order_type="STOP", price=price)
@@ -223,7 +259,7 @@ class AI(object):
 
     def trade(self):
         logger.info('action=trade status=run')
-        self.alert_signal()
+        # self.alert_signal()
         if self.back_test:
             self.trade_back_test()
         else:
@@ -258,16 +294,19 @@ class AI(object):
             atr_down = (mid_list - atr * params.atr_k_1).tolist()
             atr_up_2 = (mid_list + atr * params.atr_k_2).tolist()
             atr_down_2 = (mid_list - atr * params.atr_k_2).tolist()
-            mid_atr = math.floor((atr_up[-1] + atr_down[-1]) / 2)
+            mid_atr = math.floor((atr_up[-1] + atr_down[-1]) / 2 / constants.MIN_TRADE_PRICE_MAP[self.product_code])\
+                      * constants.MIN_TRADE_PRICE_MAP[self.product_code]
             if atr_down_2[-1] < self.atr_sell_stop_limit:
-                self.atr_sell_stop_limit = math.floor(atr_down_2[-1])
+                self.atr_sell_stop_limit = math.floor(atr_down_2[-1] / constants.MIN_TRADE_PRICE_MAP[self.product_code])\
+                                           * constants.MIN_TRADE_PRICE_MAP[self.product_code]
                 if self.in_atr_trade and self.atr_trade.side == constants.BUY:
                     if self.cancel_stop_loss(self.product_code, self.atr_trade.trade_id):
                         trade = self.send_stop_loss(self.position.units, self.atr_trade.side, self.atr_sell_stop_limit)
                         self.atr_trade = trade
                         logger.info('stop loss is updated!')
             if atr_up_2[-1] > self.atr_buy_stop_limit:
-                self.atr_buy_stop_limit = math.floor(atr_up_2[-1])
+                self.atr_buy_stop_limit = math.floor(atr_up_2[-1] / constants.MIN_TRADE_PRICE_MAP[self.product_code])\
+                                          * constants.MIN_TRADE_PRICE_MAP[self.product_code]
                 if self.in_atr_trade and self.atr_trade.side == constants.SELL:
                     if self.cancel_stop_loss(self.product_code, self.atr_trade.trade_id):
                         trade = self.send_stop_loss(self.position.units, self.atr_trade.side, self.atr_buy_stop_limit)
@@ -304,39 +343,44 @@ class AI(object):
                 if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
                     can_buy_units = math.floor(
                         self.balance.available * self.leverage * 0.8 / df.candles[-1].close * 10000) / 10000
+                    want_to_buy_units = math.floor(
+                        self.balance.available * (1 - self.stop_limit_percent) / (
+                                    df.candles[-1].close - atr_up_2[-1]) * 10000) / 10000
                 else:
                     can_buy_units = math.floor(self.balance.available * self.leverage * 0.8 / df.candles[-1].close)
+                    want_to_buy_units = math.floor(
+                        self.balance.available * (1 - self.stop_limit_percent) / (df.candles[-1].close - atr_up_2[-1]))
 
                 if self.position.side == constants.BUY:
                     current_units = self.position.units
                 else:
                     current_units = -self.position.units
-                if self.product_code == "FX_BTC_JPY":
-                    want_to_buy_units = math.floor(
-                        self.balance.available * (1 - self.stop_limit_percent) / (df.candles[-1].close - mid_atr) * 10000) / 10000
-                else:
-                    want_to_buy_units = math.floor(
-                        self.balance.available * (1 - self.stop_limit_percent) / (df.candles[-1].close - mid_atr))
                 max_units = min(want_to_buy_units, can_buy_units)
                 units = max_units - current_units
                 if units < 0:
                     units = 0
                 logger.info("ATR breaks up")
-                if units < 0.01:
+                if units < constants.MIN_TRADE_SIZE_MAP[self.product_code]:
                     logger.info(f"action=atr_buy error=units is too little units={units}, max units={max_units}, current units={current_units}")
                 else:
                     logger.info(f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}")
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
                         'text': f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}",  # 通知内容
                     }))
-                    could_buy, close_trade = self.buy(df.candles[-1], units)
+                    could_buy, _ = self.buy(df.candles[-1], units)
 
                     if could_buy:
                         self.in_atr_trade = True
-                        self.atr_buy_stop_limit = mid_atr
+                        self.atr_buy_stop_limit = math.floor(
+                            atr_up_2[-1] / constants.MIN_TRADE_PRICE_MAP[self.product_code])\
+                                                  * constants.MIN_TRADE_PRICE_MAP[self.product_code]
                         logger.info(f'stop limit={self.atr_buy_stop_limit}')
 
                         self.atr_trade = self.send_stop_loss(max_units, constants.SELL, self.atr_buy_stop_limit)
+                        requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                            'text': f"stop loss units: {max_units}, side: {constants.SELL}, price: {self.atr_buy_stop_limit}",
+                            # 通知内容
+                        }))
 
             if atr_sell_point > 0:
                 if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
@@ -349,7 +393,7 @@ class AI(object):
                     current_units = self.position.units
                 else:
                     current_units = -self.position.units
-                if self.product_code == "FX_BTC_JPY":
+                if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
                     want_to_sell_units = math.floor(
                         self.balance.available * (1 - self.stop_limit_percent) / (mid_atr - df.candles[-1].close) * 10000) / 10000
                 else:
@@ -357,22 +401,30 @@ class AI(object):
                         self.balance.available * (1 - self.stop_limit_percent) / (mid_atr - df.candles[-1].close))
                 max_units = min(want_to_sell_units, can_sell_units)
                 units = max_units - current_units
+                if units < 0:
+                    units = 0
                 logger.info("ATR breaks down")
-                if units < 0.01:
+                if units < constants.MIN_TRADE_SIZE_MAP[self.product_code]:
                     logger.info(f"action=atr_buy error=units is too little units={units}, max units={max_units}, current units={current_units}")
                 else:
                     logger.info(f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}")
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
                         'text': f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}",  # 通知内容
                     }))
-                    could_sell, close_trade = self.sell(df.candles[-1], units)
+                    could_sell, _ = self.sell(df.candles[-1], units)
 
                     if could_sell:
                         self.in_atr_trade = True
-                        self.atr_sell_stop_limit = mid_atr
+                        self.atr_sell_stop_limit = math.floor(
+                            atr_down_2[-1] / constants.MIN_TRADE_PRICE_MAP[self.product_code])\
+                                                   * constants.MIN_TRADE_PRICE_MAP[self.product_code]
                         logger.info(f'stop limit={self.atr_sell_stop_limit}')
 
                         self.atr_trade = self.send_stop_loss(max_units, constants.BUY, self.atr_sell_stop_limit)
+                        requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                            'text': f"stop loss units: {max_units}, side: {constants.BUY}, price: {self.atr_sell_stop_limit}",
+                            # 通知内容
+                        }))
 
             buy_point, sell_point = 0, 0
 
@@ -581,7 +633,7 @@ class AI(object):
                     sell_point += 1
 
             if not in_atr_trade and (buy_point > 0 or
-                                          (self.signal_events.has_short and back_test_stop_limit < df.candles[i].close)):
+                                     (self.signal_events.has_short and back_test_stop_limit < df.candles[i].close)):
 
                 units = 1
                 could_buy, close_trade = self.buy(df.candles[i], units, True)
@@ -593,7 +645,7 @@ class AI(object):
                     self.update_optimize_params(is_continue=True)
 
             if not in_atr_trade and (sell_point > 0 or
-                                          (self.signal_events.has_long and back_test_stop_limit > df.candles[i].close)):
+                                     (self.signal_events.has_long and back_test_stop_limit > df.candles[i].close)):
                 units = 1
                 could_sell, close_trade = self.sell(df.candles[i], units, True)
                 if not could_sell:

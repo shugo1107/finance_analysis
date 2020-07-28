@@ -1,7 +1,9 @@
+import datetime
 from functools import partial
 import logging
 from threading import Lock
 from threading import Thread
+import time
 
 from app.controllers.ai import AI
 from app.models.candle import create_candle_with_duration
@@ -37,6 +39,8 @@ class StreamData(object):
                 live_practice=settings.live_practice,
                 client="bitflyer")
         self.trade_lock = Lock()
+        self.trade_duration = settings.trade_duration
+        self.change_time = None
 
     def stream_ingestion_data(self):
         trade_with_ai = partial(self.trade, ai=self.ai)
@@ -45,8 +49,19 @@ class StreamData(object):
     def trade(self, ticker: Ticker, ai: AI):
         logger.info(f'action=trade ticker={ticker.__dict__}')
         for duration in constants.DURATIONS:
-            is_created = create_candle_with_duration(ticker.product_code, duration, ticker)
-            if is_created and duration == settings.trade_duration:
+            is_created, true_range, atr = create_candle_with_duration(ticker.product_code, duration, ticker)
+            # if true_range > 2 * atr and self.trade_duration == "15m":
+            #     self.trade_duration = "5m"
+            #     self.change_time = time.time()
+            # elif true_range > 2 * atr and self.trade_duration == "5m":
+            #     self.trade_duration = "1m"
+            #     self.change_time = time.time()
+            # if self.trade_duration == "1m" and time.time() - self.change_time > 840:
+            #     self.trade_duration = "5m"
+            #     self.change_time = time.time()
+            # elif self.trade_duration == "5m" and time.time() - self.change_time > 3200:
+            #     self.trade_duration = "15m"
+            if is_created and duration == self.trade_duration:
                 thread = Thread(target=self._trade, args=(ai,))
                 thread.start()
 

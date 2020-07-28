@@ -179,6 +179,10 @@ class APIClient(object):
         order = self.wait_order_complete(order_id)
         if not order:
             logger.error('action=send_order error=timeout')
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f"send_order error=timeout",
+                # 通知内容
+            }))
             raise OrderTimeoutError
 
         return self.trade_details(order.product_code, order_id)
