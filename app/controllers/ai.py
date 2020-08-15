@@ -1,3 +1,4 @@
+from collections import defaultdict
 import datetime
 import json
 import logging
@@ -62,7 +63,7 @@ class AI(object):
         self.use_percent = use_percent
         self.duration = duration
         self.past_period = past_period
-        self.optimized_trade_params = None
+        self.optimized_trade_params = dict()
         self.stop_limit = 0
         self.atr_buy_stop_limit = 0
         self.atr_sell_stop_limit = 1000000000
@@ -70,7 +71,7 @@ class AI(object):
         self.back_test = back_test
         self.start_trade = datetime.datetime.utcnow()
         self.candle_cls = factory_candle_class(self.product_code, self.duration)
-        self.update_optimize_params(False)
+        self.update_optimize_params(False, self.product_code)
         self.in_atr_trade = False
         self.atr_trade = None
         self.client = client
@@ -78,23 +79,29 @@ class AI(object):
         self.balance = self.API.get_balance()
         self.position = self.get_current_position()
 
-    def update_optimize_params(self, is_continue: bool):
+    def update_optimize_params(self, is_continue: bool, product_code=None):
+        if product_code is None:
+            product_code = self.product_code
+        if product_code not in self.optimized_trade_params.keys():
+            self.optimized_trade_params[product_code] = None
         logger.info('action=update_optimize_params status=run')
-        df = DataFrameCandle(self.product_code, self.duration)
+        df = DataFrameCandle(product_code, self.duration)
         df.set_all_candles(self.past_period)
         if df.candles:
-            self.optimized_trade_params = df.optimize_params()
-        if self.optimized_trade_params is not None:
-            logger.info(f'action=update_optimize_params params={self.optimized_trade_params.__dict__}')
+            self.optimized_trade_params[product_code] = df.optimize_params()
+        if self.optimized_trade_params[product_code] is not None:
+            logger.info(f'action=update_optimize_params params={self.optimized_trade_params[product_code].__dict__}, product_code={product_code}')
             requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                'text': f"optimized_params={self.optimized_trade_params.__dict__}",
+                'text': f"optimized_params={self.optimized_trade_params[product_code].__dict__}, product_code={product_code}",
             }))
 
         if is_continue and self.optimized_trade_params is None:
             time.sleep(10 * duration_seconds(self.duration))
             self.update_optimize_params(is_continue)
 
-    def get_current_position(self) -> Position:
+    def get_current_position(self, product_code=None) -> Position:
+        if product_code is None:
+            product_code = self.product_code
         self.balance = self.API.get_balance()
         self.trade_list = self.API.get_open_trade()
         buy_unit = 0
@@ -105,15 +112,15 @@ class AI(object):
             elif self.trade_list[i].side == constants.SELL:
                 sell_unit += self.trade_list[i].units
         units = abs(buy_unit - sell_unit)
-        if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
+        if product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
             units = math.ceil(units * 10000) / 10000
         else:
             units = math.ceil(units)
         if buy_unit >= sell_unit:
-            position = Position(product_code=self.product_code, side=constants.BUY, leverage=self.leverage,
+            position = Position(product_code=product_code, side=constants.BUY, leverage=self.leverage,
                                 units=units, require_collateral=self.balance.require_collateral)
         else:
-            position = Position(product_code=self.product_code, side=constants.SELL, leverage=self.leverage,
+            position = Position(product_code=product_code, side=constants.SELL, leverage=self.leverage,
                                 units=units, require_collateral=self.balance.require_collateral)
         requests.post(settings.WEB_HOOK_URL, data=json.dumps({
             'text': f"current position product code: {position.product_code}, units: {position.units}, side: {position.side}",  # 通知内容
@@ -121,7 +128,12 @@ class AI(object):
 
         return position
 
-    def can_buy(self, candle, units):
+    def can_buy(self, candle, units, product_code=None):
+        if product_code is None:
+            product_code = self.product_code
+        if product_code not in constants.TRADABLE_PAIR:
+            logger.warning('action=can_buy status=false error=not_tradable_product')
+            return False
         if self.start_trade > candle.time:
             logger.warning('action=can_buy status=false error=old_time')
             return False
@@ -130,7 +142,7 @@ class AI(object):
             return False
         if self.position.side == constants.SELL:
             return True
-        elif units * candle.close > float(self.balance.available) * self.position.leverage - self.position.require_collateral:
+        elif units * candle.close > float(self.balance.available) * self.position.leverage - float(self.position.require_collateral):
             logger.warning('action=can_buy status=false error=too much position')
             return False
         elif self.position.units < units * 0.8:
@@ -139,7 +151,11 @@ class AI(object):
             logger.warning('action=can_buy status=false error=probably already has the same position')
             return False
 
-    def can_sell(self, candle, units):
+    def can_sell(self, candle, units, product_code=None):
+        if product_code is None:
+            product_code = self.product_code
+        if product_code not in constants.TRADABLE_PAIR:
+            logger.warning('action=can_sell status=false error=not_tradable_product')
         if self.start_trade > candle.time:
             logger.warning('action=can_sell status=false error=old_time')
             return False
@@ -148,7 +164,7 @@ class AI(object):
             return False
         if self.position.side == constants.BUY:
             return True
-        elif units * candle.close > float(self.balance.available) * self.position.leverage - self.position.require_collateral:
+        elif units * candle.close > float(self.balance.available) * self.position.leverage - float(self.position.require_collateral):
             logger.warning('action=can_sell status=false error=too much position')
             return False
         elif self.position.units < units * 0.8:
@@ -157,18 +173,23 @@ class AI(object):
             logger.warning('action=can_sell status=false error=probably already has the same position')
             return False
 
-    def buy(self, candle, units, back_test=False):
+    def buy(self, candle, units, back_test=False, product_code=None):
+        logger.info('action=buy status=run')
+        if product_code is None:
+            product_code = self.product_code
         close_trade = False
         if back_test or self.back_test:
+            logger.info('action=buy status=back_test')
             could_buy, close_trade = self.signal_events.buy(
-                self.product_code, candle.time, candle.close, 1.0, save=False)
+                product_code, candle.time, candle.close, 1.0, save=False)
             return could_buy, close_trade
 
         if self.start_trade > candle.time:
             logger.warning('action=buy status=false error=old_time')
             return False, close_trade
 
-        if not self.can_buy(candle, units):
+        if not self.can_buy(candle, units, product_code):
+            logger.warning('action=buy status=false error=cannot buy')
             return False, close_trade
 
         sum_price = 0
@@ -183,35 +204,40 @@ class AI(object):
                 elif self.client == 'bitflyer':
                     closed_units += trade.units
 
-        if self.client == 'oanda':
-            new_units = round(units - closed_units)
-
         if self.client == 'bitflyer':
             closed_units = round(closed_units, 4)
-            close_order = Order(self.product_code, constants.BUY, closed_units)
+            close_order = Order(product_code, constants.BUY, closed_units)
             close_trade = self.API.send_order(close_order)
-            self.signal_events.buy(self.product_code, candle.time, close_trade, closed_units, save=True)
+            self.signal_events.buy(product_code, candle.time, close_trade, closed_units, save=True)
             sum_price = close_trade.price * closed_units
             new_units = round(units - closed_units, 4)
+        else:
+            new_units = round(units - closed_units)
 
-        order = Order(self.product_code, constants.BUY, new_units)
+        order = Order(product_code, constants.BUY, new_units)
+        logger.info(f'action=buy order={order.__dict__}')
         trade = self.API.send_order(order)
-        self.signal_events.buy(self.product_code, candle.time,
+        self.signal_events.buy(product_code, candle.time,
                                (trade.price * (units - closed_units) + sum_price) / units, units, save=True)
         return True, close_trade
 
-    def sell(self, candle, units, back_test=False):
+    def sell(self, candle, units, back_test=False, product_code=None):
+        logger.info('action=sell status=run')
+        if product_code is None:
+            product_code = self.product_code
         close_trade = False
         if back_test or self.back_test:
+            logger.info('action=sell status=back_test')
             could_sell, close_trade = self.signal_events.sell(
-                self.product_code, candle.time, candle.close, 1.0, save=False)
+                product_code, candle.time, candle.close, 1.0, save=False)
             return could_sell, close_trade
 
         if self.start_trade > candle.time:
             logger.warning('action=sell status=false error=old_time')
             return False, close_trade
 
-        if not self.can_sell(candle, units):
+        if not self.can_sell(candle, units, product_code):
+            logger.warning('action=sell status=false error=cannot sell')
             return False, close_trade
 
         sum_price = 0
@@ -226,25 +252,28 @@ class AI(object):
                 elif self.client == 'bitflyer':
                     closed_units += trade.units
 
-            if self.client == 'oanda':
-                new_units = round(units - closed_units)
+        if self.client == 'bitflyer':
+            closed_units = round(closed_units, 4)
+            close_order = Order(product_code, constants.SELL, closed_units)
+            close_trade = self.API.send_order(close_order)
+            self.signal_events.sell(product_code, candle.time, close_trade, closed_units, save=True)
+            sum_price = close_trade.price * closed_units
+            new_units = round(units - closed_units, 4)
 
-            if self.client == 'bitflyer':
-                closed_units = round(closed_units, 4)
-                close_order = Order(self.product_code, constants.SELL, closed_units)
-                close_trade = self.API.send_order(close_order)
-                self.signal_events.sell(self.product_code, candle.time, close_trade, closed_units, save=True)
-                sum_price = close_trade.price * closed_units
-                new_units = round(units - closed_units, 4)
+        else:
+            new_units = round(units - closed_units)
 
-        order = Order(self.product_code, constants.SELL, new_units)
+        order = Order(product_code, constants.SELL, new_units)
+        logger.info(f'action=sell order={order.__dict__}')
         trade = self.API.send_order(order)
-        self.signal_events.sell(self.product_code, candle.time,
+        self.signal_events.sell(product_code, candle.time,
                                 (trade.price * (units - closed_units) + sum_price) / units, units, save=True)
         return True, close_trade
 
-    def send_stop_loss(self, units, side, price):
-        order = Order(self.product_code, side, units, order_type="STOP", price=price)
+    def send_stop_loss(self, units, side, price, product_code=None):
+        if product_code is None:
+            product_code = self.product_code
+        order = Order(product_code, side, units, order_type="STOP", price=price)
         trade = self.API.send_stop_loss(order)
         return trade
 
@@ -257,27 +286,44 @@ class AI(object):
             return False
         return True
 
-    def trade(self):
+    def trade(self, product_code=None):
+        if product_code is None:
+            product_code = self.product_code
         logger.info('action=trade status=run')
-        # self.alert_signal()
+        # self.alert_signal(product_code)
         if self.back_test:
-            self.trade_back_test()
+            self.trade_back_test(product_code)
         else:
-            self.position = self.get_current_position()
+            self.position = self.get_current_position(product_code=product_code)
             logger.info(f"position units: {self.position.units}")
             if self.in_atr_trade and self.position.units <= 0.01:
                 self.in_atr_trade = False
                 self.atr_trade = None
                 self.atr_buy_stop_limit = 0
                 self.atr_sell_stop_limit = 1000000000
-                self.update_optimize_params(is_continue=True)
-            params = self.optimized_trade_params
+                self.update_optimize_params(is_continue=True, product_code=product_code)
+            if product_code not in self.optimized_trade_params.keys():
+                self.optimized_trade_params[product_code] = None
+            params = self.optimized_trade_params[product_code]
             if params is None:
-                self.update_optimize_params(False)
+                self.update_optimize_params(False, product_code)
                 return
 
-            df = DataFrameCandle(self.product_code, self.duration)
+            df = DataFrameCandle(product_code, self.duration)
             df.set_all_candles(self.past_period)
+
+            if product_code[-3:] == "JPY":
+                fx_adjustment = 1
+            elif product_code[-3:] == "USD":
+                usd_jpy = DataFrameCandle("USD_JPY", self.duration)
+                usd_jpy.set_all_candles(1)
+                fx_adjustment =usd_jpy.candles[-1].close
+            elif product_code[-3:] == "EUR":
+                eur_jpy = DataFrameCandle("EUR_JPY", self.duration)
+                eur_jpy.set_all_candles(1)
+                fx_adjustment =eur_jpy.candles[-1].close
+            else:
+                fx_adjustment = 1
 
             if params.ema_enable:
                 ema_values_1 = talib.EMA(np.array(df.closes), params.ema_period_1)
@@ -294,25 +340,27 @@ class AI(object):
             atr_down = (mid_list - atr * params.atr_k_1).tolist()
             atr_up_2 = (mid_list + atr * params.atr_k_2).tolist()
             atr_down_2 = (mid_list - atr * params.atr_k_2).tolist()
-            mid_atr = math.floor((atr_up[-1] + atr_down[-1]) / 2 / constants.MIN_TRADE_PRICE_MAP[self.product_code])\
-                      * constants.MIN_TRADE_PRICE_MAP[self.product_code]
+            # mid_atr = math.floor((atr_up[-1] + atr_down[-1]) / 2 / constants.MIN_TRADE_PRICE_MAP[product_code])\
+            #           * constants.MIN_TRADE_PRICE_MAP[product_code]
             if atr_down_2[-1] < self.atr_sell_stop_limit:
-                self.atr_sell_stop_limit = math.floor(atr_down_2[-1] / constants.MIN_TRADE_PRICE_MAP[self.product_code])\
-                                           * constants.MIN_TRADE_PRICE_MAP[self.product_code]
+                self.atr_sell_stop_limit = math.floor(atr_down_2[-1] / constants.MIN_TRADE_PRICE_MAP[product_code])\
+                                           * constants.MIN_TRADE_PRICE_MAP[product_code]
                 if self.in_atr_trade and self.atr_trade.side == constants.BUY:
-                    if self.cancel_stop_loss(self.product_code, self.atr_trade.trade_id):
-                        trade = self.send_stop_loss(self.position.units, self.atr_trade.side, self.atr_sell_stop_limit)
+                    if self.cancel_stop_loss(product_code, self.atr_trade.trade_id):
+                        trade = self.send_stop_loss(
+                            self.position.units, self.atr_trade.side, self.atr_sell_stop_limit, product_code)
                         self.atr_trade = trade
                         logger.info('stop loss is updated!')
             if atr_up_2[-1] > self.atr_buy_stop_limit:
-                self.atr_buy_stop_limit = math.floor(atr_up_2[-1] / constants.MIN_TRADE_PRICE_MAP[self.product_code])\
-                                          * constants.MIN_TRADE_PRICE_MAP[self.product_code]
+                self.atr_buy_stop_limit = math.floor(atr_up_2[-1] / constants.MIN_TRADE_PRICE_MAP[product_code])\
+                                          * constants.MIN_TRADE_PRICE_MAP[product_code]
                 if self.in_atr_trade and self.atr_trade.side == constants.SELL:
-                    if self.cancel_stop_loss(self.product_code, self.atr_trade.trade_id):
-                        trade = self.send_stop_loss(self.position.units, self.atr_trade.side, self.atr_buy_stop_limit)
+                    if self.cancel_stop_loss(product_code, self.atr_trade.trade_id):
+                        trade = self.send_stop_loss(
+                            self.position.units, self.atr_trade.side, self.atr_buy_stop_limit, product_code)
                         self.atr_trade = trade
                         logger.info('stop loss is updated!')
-            logger.info(f'sell stop: {self.atr_sell_stop_limit}, buy stop: {self.atr_buy_stop_limit}, mid atr:{mid_atr}')
+            logger.info(f'sell _stop: {self.atr_sell_stop_limit}, buy_stop: {self.atr_buy_stop_limit}')
             if self.atr_trade is not None:
                 logger.info(f"in atr: {self.in_atr_trade}, atr trade side: {self.atr_trade.side}")
             else:
@@ -325,7 +373,8 @@ class AI(object):
                 rsi_values = talib.RSI(np.array(df.closes), params.rsi_period)
 
             if params.macd_enable:
-                macd, macd_signal, _ = talib.MACD(np.array(df.closes), params.macd_fast_period, params.macd_slow_period, params.macd_signal_period)
+                macd, macd_signal, _ = talib.MACD(
+                    np.array(df.closes), params.macd_fast_period, params.macd_slow_period, params.macd_signal_period)
 
             atr_buy_point, atr_sell_point = 0, 0
             logger.info(f"atr_up: {atr_up[-1]}, atr_down; {atr_down[-1]}, current price: {df.candles[-1].close}")
@@ -340,16 +389,17 @@ class AI(object):
 
             logger.info(f"atr_buy_point: {atr_buy_point}, atr_sell_point; {atr_sell_point}")
             if atr_buy_point > 0:
-                if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
+                if product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
                     can_buy_units = math.floor(
-                        self.balance.available * self.leverage * 0.8 / df.candles[-1].close * 10000) / 10000
+                        float(self.balance.available) * self.leverage * 0.8 / df.candles[-1].close * 10000) / 10000
                     want_to_buy_units = math.floor(
-                        self.balance.available * (1 - self.stop_limit_percent) / (
+                        float(self.balance.available) * (1 - self.stop_limit_percent) / (
                                     df.candles[-1].close - atr_up_2[-1]) * 10000) / 10000
                 else:
-                    can_buy_units = math.floor(self.balance.available * self.leverage * 0.8 / df.candles[-1].close)
+                    can_buy_units = math.floor(
+                        float(self.balance.available) * self.leverage * 0.8 / (df.candles[-1].close * fx_adjustment))
                     want_to_buy_units = math.floor(
-                        self.balance.available * (1 - self.stop_limit_percent) / (df.candles[-1].close - atr_up_2[-1]))
+                        float(self.balance.available) * (1 - self.stop_limit_percent) / ((df.candles[-1].close - atr_up_2[-1]) * fx_adjustment))
 
                 if self.position.side == constants.BUY:
                     current_units = self.position.units
@@ -360,67 +410,70 @@ class AI(object):
                 if units < 0:
                     units = 0
                 logger.info("ATR breaks up")
-                if units < constants.MIN_TRADE_SIZE_MAP[self.product_code]:
+                if units < constants.MIN_TRADE_SIZE_MAP[product_code]:
                     logger.info(f"action=atr_buy error=units is too little units={units}, max units={max_units}, current units={current_units}")
                 else:
                     logger.info(f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}")
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
                         'text': f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}",  # 通知内容
                     }))
-                    could_buy, _ = self.buy(df.candles[-1], units)
+                    could_buy, _ = self.buy(df.candles[-1], units, product_code=product_code)
 
                     if could_buy:
                         self.in_atr_trade = True
                         self.atr_buy_stop_limit = math.floor(
-                            atr_up_2[-1] / constants.MIN_TRADE_PRICE_MAP[self.product_code])\
-                                                  * constants.MIN_TRADE_PRICE_MAP[self.product_code]
+                            atr_up_2[-1] / constants.MIN_TRADE_PRICE_MAP[product_code])\
+                                                  * constants.MIN_TRADE_PRICE_MAP[product_code]
                         logger.info(f'stop limit={self.atr_buy_stop_limit}')
 
-                        self.atr_trade = self.send_stop_loss(max_units, constants.SELL, self.atr_buy_stop_limit)
+                        self.atr_trade = self.send_stop_loss(max_units, constants.SELL, self.atr_buy_stop_limit, product_code)
                         requests.post(settings.WEB_HOOK_URL, data=json.dumps({
                             'text': f"stop loss units: {max_units}, side: {constants.SELL}, price: {self.atr_buy_stop_limit}",
                             # 通知内容
                         }))
 
             if atr_sell_point > 0:
-                if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
+                if product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
                     can_sell_units = math.floor(
-                        self.balance.available * self.leverage * 0.8 / df.candles[-1].close * 10000) / 10000
+                        float(self.balance.available) * self.leverage * 0.8 / df.candles[-1].close * 10000) / 10000
                 else:
-                    can_sell_units = math.floor(self.balance.available * self.leverage * 0.8 / df.candles[-1].close)
+                    can_sell_units = math.floor(
+                        float(self.balance.available) * self.leverage * 0.8 / (df.candles[-1].close * fx_adjustment))
 
                 if self.position.side == constants.SELL:
                     current_units = self.position.units
                 else:
                     current_units = -self.position.units
-                if self.product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
+                if product_code == constants.PRODUCT_CODE_FX_BTC_JPY:
                     want_to_sell_units = math.floor(
-                        self.balance.available * (1 - self.stop_limit_percent) / (mid_atr - df.candles[-1].close) * 10000) / 10000
+                        float(self.balance.available) * (1 - self.stop_limit_percent) / (atr_down_2[-1] - df.candles[-1].close) * 10000) / 10000
                 else:
                     want_to_sell_units = math.floor(
-                        self.balance.available * (1 - self.stop_limit_percent) / (mid_atr - df.candles[-1].close))
+                        float(self.balance.available) * (1 - self.stop_limit_percent) / ((atr_down_2[-1] - df.candles[-1].close) * fx_adjustment))
                 max_units = min(want_to_sell_units, can_sell_units)
                 units = max_units - current_units
                 if units < 0:
                     units = 0
                 logger.info("ATR breaks down")
-                if units < constants.MIN_TRADE_SIZE_MAP[self.product_code]:
+                if units < constants.MIN_TRADE_SIZE_MAP[product_code]:
                     logger.info(f"action=atr_buy error=units is too little units={units}, max units={max_units}, current units={current_units}")
                 else:
                     logger.info(f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}")
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}",  # 通知内容
+                        'text': f"ATR trade units: {units}, max units: {max_units}, current units: {current_units}, product code: {product_code}",  # 通知内容
                     }))
-                    could_sell, _ = self.sell(df.candles[-1], units)
+                    could_sell, _ = self.sell(df.candles[-1], units, product_code=product_code)
+                    logger.info(f'action=sell could_sell={could_buy}')
 
                     if could_sell:
                         self.in_atr_trade = True
                         self.atr_sell_stop_limit = math.floor(
-                            atr_down_2[-1] / constants.MIN_TRADE_PRICE_MAP[self.product_code])\
-                                                   * constants.MIN_TRADE_PRICE_MAP[self.product_code]
+                            atr_down_2[-1] / constants.MIN_TRADE_PRICE_MAP[product_code])\
+                                                   * constants.MIN_TRADE_PRICE_MAP[product_code]
                         logger.info(f'stop limit={self.atr_sell_stop_limit}')
 
-                        self.atr_trade = self.send_stop_loss(max_units, constants.BUY, self.atr_sell_stop_limit)
+                        self.atr_trade = self.send_stop_loss(
+                            max_units, constants.BUY, self.atr_sell_stop_limit, product_code)
                         requests.post(settings.WEB_HOOK_URL, data=json.dumps({
                             'text': f"stop loss units: {max_units}, side: {constants.BUY}, price: {self.atr_sell_stop_limit}",
                             # 通知内容
@@ -481,48 +534,51 @@ class AI(object):
                     logger.info("RSI sell signal")
                     sell_point += 1
 
+            logger.info(f'buy_point: {buy_point}, sell_point: {sell_point}')
             if not self.in_atr_trade and (buy_point > 0 or
                                           (len(self.trade_list) > 1 and self.stop_limit < df.candles[-1].close)):
 
-                if self.product_code == "FX_BTC_JPY":
+                if product_code == "FX_BTC_JPY":
                     use_balance = self.balance.available * settings.use_percent
                     units = math.floor((use_balance / df.candles[-1].close) * 10000) / 10000
                 else:
-                    units = int(float(self.balance.available) * self.use_percent / df.candles[-1].close)
-                could_buy, close_trade = self.buy(df.candles[-1], units)
+                    units = int(float(self.balance.available) * self.use_percent / (df.candles[-1].close * fx_adjustment))
+                could_buy, close_trade = self.buy(df.candles[-1], units, product_code=product_code)
                 if could_buy:
                     self.stop_limit = df.candles[-1].close * self.stop_limit_percent
                     logger.info(f"stop limit is {self.stop_limit}")
                     if close_trade:
-                        self.update_optimize_params(is_continue=True)
+                        self.update_optimize_params(is_continue=True, product_code=product_code)
 
             if not self.in_atr_trade and (sell_point > 0 or
                                           (len(self.trade_list) > 1 and self.stop_limit > df.candles[-1].close)):
-                if self.product_code == "FX_BTC_JPY":
+                if product_code == "FX_BTC_JPY":
                     use_balance = self.balance.available * settings.use_percent
                     units = math.floor((use_balance / df.candles[-1].close) * 10000) / 10000
                 else:
-                    units = int(float(self.balance.available) * self.use_percent / df.candles[-1].close)
-                could_sell, close_trade = self.sell(df.candles[-1], units)
+                    units = int(float(self.balance.available) * self.use_percent / (df.candles[-1].close * fx_adjustment))
+                could_sell, close_trade = self.sell(df.candles[-1], units, product_code=product_code)
                 if could_sell:
                     self.stop_limit = df.candles[-1].close * (2 - self.stop_limit_percent)
                     logger.info(f"stop limit is {self.stop_limit}")
                     if close_trade:
-                        self.update_optimize_params(is_continue=True)
+                        self.update_optimize_params(is_continue=True, product_code=product_code)
 
-    def trade_back_test(self):
+    def trade_back_test(self, product_code=None):
+        if product_code is None:
+            product_code = self.product_code
         logger.info('action=back_test status=run')
         back_test_stop_limit = 0
         back_test_atr_buy_stop_limit = 0
         back_test_atr_sell_stop_limit = 1000000000
         in_atr_trade = False
 
-        params = self.optimized_trade_params
+        params = self.optimized_trade_params[product_code]
         if params is None:
-            self.update_optimize_params(False)
+            self.update_optimize_params(False, product_code)
             return
 
-        df = DataFrameCandle(self.product_code, self.duration)
+        df = DataFrameCandle(product_code, self.duration)
         df.set_all_candles(self.past_period)
 
         if params.ema_enable:
@@ -565,18 +621,18 @@ class AI(object):
 
             if atr_buy_point > 0 or back_test_atr_sell_stop_limit < df.candles[i].close:
                 units = 1
-                could_buy, close_trade = self.buy(df.candles[i], units, True)
+                could_buy, close_trade = self.buy(df.candles[i], units, True, product_code)
                 if not could_buy:
                     continue
                 in_atr_trade = True
                 back_test_atr_buy_stop_limit = atr_down[i]
                 if close_trade:
                     in_atr_trade = False
-                    self.update_optimize_params(is_continue=True)
+                    self.update_optimize_params(is_continue=True, product_code=product_code)
 
             if atr_sell_point > 0 or back_test_atr_buy_stop_limit > df.candles[i].close:
                 units = 1
-                could_sell, close_trade = self.sell(df.candles[i], units, True)
+                could_sell, close_trade = self.sell(df.candles[i], units, True, product_code=product_code)
                 if not could_sell:
                     continue
 
@@ -584,7 +640,7 @@ class AI(object):
                 back_test_atr_sell_stop_limit = atr_up[i]
                 if close_trade:
                     in_atr_trade = False
-                    self.update_optimize_params(is_continue=True)
+                    self.update_optimize_params(is_continue=True, product_code=product_code)
 
         for i in range(1, len(df.candles)):
             buy_point, sell_point = 0, 0
@@ -636,30 +692,32 @@ class AI(object):
                                      (self.signal_events.has_short and back_test_stop_limit < df.candles[i].close)):
 
                 units = 1
-                could_buy, close_trade = self.buy(df.candles[i], units, True)
+                could_buy, close_trade = self.buy(df.candles[i], units, True, product_code)
                 if not could_buy:
                     continue
 
                 back_test_stop_limit = df.candles[i].close * self.stop_limit_percent
                 if close_trade:
-                    self.update_optimize_params(is_continue=True)
+                    self.update_optimize_params(is_continue=True, product_code=product_code)
 
             if not in_atr_trade and (sell_point > 0 or
                                      (self.signal_events.has_long and back_test_stop_limit > df.candles[i].close)):
                 units = 1
-                could_sell, close_trade = self.sell(df.candles[i], units, True)
+                could_sell, close_trade = self.sell(df.candles[i], units, True, product_code)
                 if not could_sell:
                     continue
 
                 back_test_stop_limit = df.candles[i].close * (2 - self.stop_limit_percent)
                 if close_trade:
-                    self.update_optimize_params(is_continue=True)
+                    self.update_optimize_params(is_continue=True, product_code=product_code)
 
-    def alert_signal(self):
+    def alert_signal(self, product_code=None):
+        if product_code is None:
+            product_code = self.product_code
         logger.info('action=alert_signal status=run')
         for duration in [constants.DURATION_5M, constants.DURATION_15M, constants.DURATION_30M,
                          constants.DURATION_1H, constants.DURATION_1D]:
-            df = DataFrameCandle(self.product_code, duration)
+            df = DataFrameCandle(product_code, duration)
             df.set_all_candles(self.past_period)
 
             ema_values_1 = talib.EMA(np.array(df.closes), 5)
@@ -683,43 +741,43 @@ class AI(object):
             if 75 <= len(df.candles):
                 if ema_values_1[-2] < ema_values_2[-2] and ema_values_1[-1] >= ema_values_2[-1]:
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f'EMA5 surpassed EMA25; duration: {duration}, product_code: {self.product_code}', # 通知内容
+                        'text': f'EMA5 surpassed EMA25; duration: {duration}, product_code: {product_code}', # 通知内容
                     }))
 
                 if ema_values_1[-2] > ema_values_2[-2] and ema_values_1[-1] <= ema_values_2[-1]:
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f'EMA5 went below EMA25; duration: {duration}, product_code: {self.product_code}', # 通知内容
+                        'text': f'EMA5 went below EMA25; duration: {duration}, product_code: {product_code}', # 通知内容
                     }))
 
                 if ema_values_1[-2] < ema_values_3[-2] and ema_values_1[-1] >= ema_values_3[-1]:
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f'EMA5 surpassed EMA75; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'text': f'EMA5 surpassed EMA75; duration: {duration}, product_code: {product_code}',  # 通知内容
                     }))
 
                 if ema_values_1[-2] > ema_values_3[-2] and ema_values_1[-1] <= ema_values_3[-1]:
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f'EMA5 went below EMA75; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'text': f'EMA5 went below EMA75; duration: {duration}, product_code: {product_code}',  # 通知内容
                     }))
 
                 if ema_values_2[-2] < ema_values_3[-2] and ema_values_2[-1] >= ema_values_3[-1]:
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f'EMA25 surpassed EMA75; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'text': f'EMA25 surpassed EMA75; duration: {duration}, product_code: {product_code}',  # 通知内容
                     }))
 
                 if ema_values_2[-2] > ema_values_3[-2] and ema_values_2[-1] <= ema_values_3[-1]:
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f'EMA25 went below EMA75; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'text': f'EMA25 went below EMA75; duration: {duration}, product_code: {product_code}',  # 通知内容
                     }))
 
             # if 20 <= len(df.candles):
             #     if bb_down[-2] > df.candles[-2].close and bb_down[-1] <= df.candles[-1].close:
             #         requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-            #             'text': f'candle stick surpassed BB_Down; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+            #             'text': f'candle stick surpassed BB_Down; duration: {duration}, product_code: {product_code}',  # 通知内容
             #         }))
             #
             #     if bb_up[-2] < df.candles[-2].close and bb_up[-1] >= df.candles[-1].close:
             #         requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-            #             'text': f'candle stick went below BB_Up; duration: {duration}, product_code: {self.product_code}', # 通知内容
+            #             'text': f'candle stick went below BB_Up; duration: {duration}, product_code: {product_code}', # 通知内容
             #         }))
 
             if (chikou[-2] < df.candles[-2].high and
@@ -728,7 +786,7 @@ class AI(object):
                     senkou_b[-1] < df.candles[-1].low and
                     tenkan[-1] > kijun[-1]):
                 requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                    'text': f'三役好転; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'text': f'三役好転; duration: {duration}, product_code: {product_code}',  # 通知内容
                 }))
 
             if (chikou[-2] > df.candles[-2].low and
@@ -737,36 +795,36 @@ class AI(object):
                     senkou_b[-1] > df.candles[-1].high and
                     tenkan[-1] < kijun[-1]):
                 requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                    'text': f'三役逆転; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'text': f'三役逆転; duration: {duration}, product_code: {product_code}',  # 通知内容
                 }))
 
             if macd[-1] < 0 and macd_signal[-1] < 0 and macd[-2] < macd_signal[-2] and macd[-1] >= macd_signal[-1]:
                 requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                    'text': f'MACD surpassed MACD signal; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'text': f'MACD surpassed MACD signal; duration: {duration}, product_code: {product_code}',  # 通知内容
                 }))
 
             if macd[-1] > 0 and macd_signal[-1] > 0 and macd[-2] > macd_signal[-2] and macd[-1] <= macd_signal[-1]:
                 requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                    'text': f'MACD went below MACD signal; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'text': f'MACD went below MACD signal; duration: {duration}, product_code: {product_code}',  # 通知内容
                 }))
 
             if rsi_values[-2] != 0 and rsi_values[-2] != 100:
                 if rsi_values[-2] < 30 and rsi_values[-1] >= 30:
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f'candle stick surpassed RSI 30; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'text': f'candle stick surpassed RSI 30; duration: {duration}, product_code: {product_code}',  # 通知内容
                     }))
 
                 if rsi_values[-2] > 70 and rsi_values[-1] <= 70:
                     requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                        'text': f'candle stick went below RSI 70; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                        'text': f'candle stick went below RSI 70; duration: {duration}, product_code: {product_code}',  # 通知内容
                     }))
 
             if atr_up[-2] > df.candles[-2].close and atr_up[-1] <= df.candles[-1].close:
                 requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                    'text': f'candle stick broke ATR Up; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'text': f'candle stick broke ATR Up; duration: {duration}, product_code: {product_code}',  # 通知内容
                 }))
 
             if atr_down[-2] < df.candles[-2].close and atr_down[-1] >= df.candles[-1].close:
                 requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                    'text': f'candle stick broke ATR Down; duration: {duration}, product_code: {self.product_code}',  # 通知内容
+                    'text': f'candle stick broke ATR Down; duration: {duration}, product_code: {product_code}',  # 通知内容
                 }))

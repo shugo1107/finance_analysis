@@ -93,6 +93,20 @@
                 index: [],
                 values: []
             },
+            di: {
+                enable: false,
+                indexes: [],
+                n: 14,
+                plus_di: [],
+                minus_di: []
+            },
+            adx: {
+                enable: false,
+                indexes: [],
+                n: 14,
+                adx: [],
+                adxr: []
+            },
             rsi: {
                 enable: false,
                 indexes: {'up': 0, 'value': 0, 'down': 0},
@@ -102,6 +116,12 @@
                 down: 30
             },
             macd: {
+                enable: false,
+                indexes: [],
+                periods: [],
+                values: []
+            },
+            force_idx: {
                 enable: false,
                 indexes: [],
                 periods: [],
@@ -131,10 +151,18 @@
             config.events.indexes = [];
             config.events.values = [];
             config.volume.index = [];
+            config.di.indexes = [];
+            config.di.plus_di = [];
+            config.di.minus_di = [];
+            config.adx.indexes = [];
+            config.adx.adx = [];
+            config.adx.adxr = [];
             config.rsi.indexes = [];
             config.macd.indexes = [];
             config.macd.periods = [];
             config.macd.values = [];
+            config.force_idx.indexes = [];
+            config.force_idx.values = [];
         }
 
         function drawChart(dataTable) {
@@ -253,6 +281,66 @@
                 charts.push(volumeChart)
             }
 
+            if (config.di.enable == true) {
+                if ($('#di_div').length == 0) {
+                    $('#technical_div').append(
+                            "<div id='di_div' class='bottom_chart'>" +
+                            "<span class='technical_title'>DI</span>" +
+                            "<div id='di_chart'></div>" +
+                            "</div>")
+                }
+                var diColumns = [{'type': 'string'}];
+
+                diColumns.push(config.candlestick.numViews + config.di.indexes[0]);
+                diColumns.push(config.candlestick.numViews + config.di.indexes[1]);
+                var diChart = new google.visualization.ChartWrapper({
+                    'chartType': 'LineChart',
+                    'containerId': 'di_chart',
+                    'options': {
+                        'hAxis': {'slantedText': false},
+                        'legend': {'position': 'none'},
+                        'series': {
+                            0: {type: 'line', lineWidth: 1},
+                            1: {type: 'line', lineWidth: 1}
+                        }
+                    },
+                    'view': {
+                        'columns': diColumns
+                    }
+                });
+                charts.push(diChart)
+            }
+
+            if (config.adx.enable == true) {
+                if ($('#adx_div').length == 0) {
+                    $('#technical_div').append(
+                            "<div id='adx_div' class='bottom_chart'>" +
+                            "<span class='technical_title'>ADX</span>" +
+                            "<div id='adx_chart'></div>" +
+                            "</div>")
+                }
+                var adxColumns = [{'type': 'string'}];
+
+                adxColumns.push(config.candlestick.numViews + config.adx.indexes[0]);
+                adxColumns.push(config.candlestick.numViews + config.adx.indexes[1]);
+                var adxChart = new google.visualization.ChartWrapper({
+                    'chartType': 'LineChart',
+                    'containerId': 'adx_chart',
+                    'options': {
+                        'hAxis': {'slantedText': false},
+                        'legend': {'position': 'none'},
+                        'series': {
+                            0: {type: 'line', lineWidth: 1},
+                            1: {type: 'line', lineWidth: 1}
+                        }
+                    },
+                    'view': {
+                        'columns': adxColumns
+                    }
+                });
+                charts.push(adxChart)
+            }
+
             if (config.rsi.enable == true) {
                 if ($('#rsi_div').length == 0) {
                     $('#technical_div').append(
@@ -281,6 +369,38 @@
                     }
                 });
                 charts.push(rsiChart)
+            }
+
+            if (config.force_idx.enable == true) {
+                if (config.force_idx.indexes.length == 0) { return }
+                if ($('#force_idx_div').length == 0) {
+                    $('#technical_div').append(
+                            "<div id='force_idx_div'>" +
+                            "<span class='technical_title'>Force_Index</span>" +
+                            "<div id='force_idx_chart'></div>" +
+                            "</div>")
+                }
+                var forceIdxColumns = [{'type': 'string'}];
+
+                forceIdxColumns.push(config.candlestick.numViews + config.force_idx.indexes[0]);
+                forceIdxColumns.push(config.candlestick.numViews + config.force_idx.indexes[1]);
+                forceIdxColumns.push(config.candlestick.numViews + config.force_idx.indexes[2]);
+                var forceIdxChart = new google.visualization.ChartWrapper({
+                    'chartType': 'ComboChart',
+                    'containerId': 'force_idx_chart',
+                    'options': {
+                        legend: {'position': 'none'},
+                        seriesType: "bars",
+                        series: {
+                            1: {type: 'line', lineWidth: 1},
+                            2: {type: 'line', lineWidth: 1}
+                        }
+                    },
+                    'view': {
+                        'columns': forceIdxColumns
+                    }
+                });
+                charts.push(forceIdxChart)
             }
 
             if (config.macd.enable == true) {
@@ -378,6 +498,16 @@
                 params["events"] = true;
             }
 
+            if (config.di.enable == true) {
+                params["di"] = true;
+                params["diN"] = config.di.n;
+            }
+
+            if (config.adx.enable == true) {
+                params["adx"] = true;
+                params["adxN"] = config.adx.n;
+            }
+
             if (config.rsi.enable == true) {
                 params["rsi"] = true;
                 params["rsiPeriod"] = config.rsi.period;
@@ -388,6 +518,13 @@
                 params["macdPeriod1"] = config.macd.periods[0];
                 params["macdPeriod2"] = config.macd.periods[1];
                 params["macdPeriod3"] = config.macd.periods[2];
+            }
+
+            if (config.force_idx.enable == true) {
+                params["force_idx"] = true;
+                params["forceIdxPeriod1"] = config.force_idx.periods[0];
+                params["forceIdxPeriod2"] = config.force_idx.periods[1];
+                params["forceIdxPeriod3"] = config.force_idx.periods[2];
             }
 
             $.get("/api/candle/", params).done(function (data) {
@@ -451,8 +588,6 @@
                     config.atr.indexes[0] = config.dataTable.index;
                     config.dataTable.index += 1;
                     config.atr.indexes[1] = config.dataTable.index;
-                    config.dataTable.index += 1;
-                    config.atr.indexes[2] = config.dataTable.index;
                     dataTable.addColumn('number', 'Atr Up(' + n + ',' + k + ')');
                     dataTable.addColumn('number', 'Atr Down(' + n + ',' + k + ')');
                     config.atr.up = up;
@@ -510,6 +645,34 @@
                     }
                 }
 
+                if (data['di'] != undefined) {
+                    var n = data['di']['n'];
+                    var plus_di = data['di']['plus_di'];
+                    var minus_di = data['di']['minus_di'];
+                    config.dataTable.index += 1;
+                    config.di.indexes[0] = config.dataTable.index;
+                    config.dataTable.index += 1;
+                    config.di.indexes[1] = config.dataTable.index;
+                    dataTable.addColumn('number', 'Plus_Di(' + n + ')');
+                    dataTable.addColumn('number', 'Minus_Di(' + n + ')');
+                    config.di.plus_di = plus_di;
+                    config.di.minus_di = minus_di;
+                }
+
+                if (data['adx'] != undefined) {
+                    var n = data['adx']['n'];
+                    var adx = data['adx']['adx'];
+                    var adxr = data['adx']['adxr'];
+                    config.dataTable.index += 1;
+                    config.adx.indexes[0] = config.dataTable.index;
+                    config.dataTable.index += 1;
+                    config.adx.indexes[1] = config.dataTable.index;
+                    dataTable.addColumn('number', 'Adx(' + n + ')');
+                    dataTable.addColumn('number', 'Adxr(' + n + ')');
+                    config.adx.adx = adx;
+                    config.adx.adxr = adxr;
+                }
+
                 if (data['rsi'] != undefined ){
                     config.dataTable.index += 1;
                     config.rsi.indexes['up'] = config.dataTable.index;
@@ -549,6 +712,17 @@
                     config.macd.periods[0] = fast_period;
                     config.macd.periods[1] = slow_period;
                     config.macd.periods[2] = signal_period;
+                }
+
+                if (data["force_idx"] != undefined) {
+                    for (i = 0; i < data['force_idx'].length; i++){
+                        var forceIdxData = data['force_idx'][i];
+                        if (forceIdxData.length == 0){ continue; }
+                        config.dataTable.index += 1;
+                        config.force_idx.indexes[i] = config.dataTable.index;
+                        dataTable.addColumn('number', 'Force_Index' + forceIdxData["n"].toString());
+                        config.force_idx.values[i] = forceIdxData["force_idx"]
+                    }
                 }
 
                 var googleChartData = [];
@@ -653,6 +827,32 @@
                         }
                     }
 
+                    if (data["di"] != undefined) {
+                        if (config.di.plus_di[i] == 0) {
+                            datas.push(null);
+                        } else {
+                            datas.push(config.di.plus_di[i]);
+                        }
+                        if (config.di.minus_di[i] == 0) {
+                            datas.push(null);
+                        } else {
+                            datas.push(config.di.minus_di[i]);
+                        }
+                    }
+
+                    if (data["adx"] != undefined) {
+                        if (config.adx.adx[i] == 0) {
+                            datas.push(null);
+                        } else {
+                            datas.push(config.adx.adx[i]);
+                        }
+                        if (config.adx.adxr[i] == 0) {
+                            datas.push(null);
+                        } else {
+                            datas.push(config.adx.adxr[i]);
+                        }
+                    }
+
                     if (data["rsi"] != undefined){
                         datas.push(config.rsi.up);
                         if (config.rsi.values[i] == 0) {
@@ -669,6 +869,16 @@
                                 datas.push(null);
                             } else {
                                 datas.push(config.macd.values[j][i]);
+                            }
+                        }
+                    }
+
+                    if (data["force_idx"] != undefined) {
+                        for (j = 0; j < config.force_idx.values.length; j++) {
+                            if (config.force_idx.values[j][i] == 0) {
+                                datas.push(null);
+                            } else {
+                                datas.push(config.force_idx.values[j][i]);
                             }
                         }
                     }
@@ -796,6 +1006,34 @@
                 }
             });
 
+            $('#inputDi').change(function() {
+                if (this.checked === true) {
+                    config.di.enable = true;
+                } else {
+                    $('#di_div').remove();
+                    config.di.enable = false;
+                }
+                send();
+            });
+            $("#inputDiN").change(function() {
+                config.di.n = this.value;
+                send();
+            });
+
+            $('#inputAdx').change(function() {
+                if (this.checked === true) {
+                    config.adx.enable = true;
+                } else {
+                    $('#adx_div').remove();
+                    config.adx.enable = false;
+                }
+                send();
+            });
+            $("#inputAdxN").change(function() {
+                config.adx.n = this.value;
+                send();
+            });
+
             $('#inputRsi').change(function() {
                 if (this.checked === true) {
                     config.rsi.enable = true;
@@ -829,6 +1067,25 @@
             });
             $("#inputMacdPeriod3").change(function() {
                 config.macd.periods[2] = this.value;
+                send();
+            });
+
+            $('#inputForceIdx').change(function() {
+                if (this.checked === true) {
+                    config.force_idx.enable = true;
+                } else {
+                    $('#force_idx_div').remove();
+                    config.force_idx.enable = false;
+                }
+                send();
+            });
+            $("#inputForceIdxPeriod1").change(function() {
+                config.force_idx.periods[0] = 1;
+                config.force_idx.periods[1] = this.value;
+                send();
+            });
+            $("#inputForceIdxPeriod2").change(function() {
+                config.force_idx.periods[2] = this.value;
                 send();
             });
 
@@ -903,6 +1160,16 @@
 </div>
 
 <div>
+    Di <input id="inputDi" type="checkbox">
+    N <input id="inputDiN" type="text" value="14" style="width: 15px;">
+</div>
+
+<div>
+    Adx <input id="inputAdx" type="checkbox">
+    N <input id="inputAdxN" type="text" value="14" style="width: 15px;">
+</div>
+
+<div>
     Rsi <input id="inputRsi" type="checkbox">
     Period <input id="inputRsiPeriod" type="text" value="14" style="width: 15px;">
 </div>
@@ -912,6 +1179,12 @@
     Period<input id="inputMacdPeriod1" type="text" value="12" style="width: 15px;">
     <input id="inputMacdPeriod2" type="text" value="26" style="width: 15px;">
     <input id="inputMacdPeriod3" type="text" value="9" style="width: 15px;">
+</div>
+
+<div>
+    勢力指数 <input id="inputForceIdx" type="checkbox">
+    Period<input id="inputForceIdxPeriod1" type="text" value="2" style="width: 15px;">
+    <input id="inputForceIdxPeriod2" type="text" value="13" style="width: 15px;">
 </div>
 
 <div>

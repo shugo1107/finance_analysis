@@ -6,6 +6,8 @@ from app.controllers.streamdata import StreamData
 from app.controllers.webserver import start
 import settings
 
+from app.models.dfcandle import DataFrameCandle
+
 
 # logging.basicConfig(filename='logfile/logger.log', level=logging.INFO)
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)

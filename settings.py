@@ -6,7 +6,7 @@ from utils.utils import bool_from_str
 conf = configparser.ConfigParser()
 conf.read('settings.ini')
 
-client = "oanda"
+client = "bitflyer"
 
 oanda_account_id = conf['oanda']['account_id']
 oanda_access_token = conf['oanda']['access_token']
@@ -37,3 +37,4 @@ stop_limit_percent = float(conf['pytrading']['stop_limit_percent'])
 num_ranking = int(conf['pytrading']['num_ranking'])
 
 WEB_HOOK_URL = conf['slack']['WEB_HOOK_URL']
+password = conf['slack']['pass']

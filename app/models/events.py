@@ -21,8 +21,8 @@ class SignalEvent(Base):
     __tablename__ = 'signal_event'
 
     time = Column(DateTime, primary_key=True, nullable=False)
-    product_code = Column(String)
-    side = Column(String)
+    product_code = Column(String(20))
+    side = Column(String(8))
     price = Column(Float)
     units = Column(Integer)
 

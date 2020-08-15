@@ -1,4 +1,10 @@
 import numpy as np
+import talib
+
+
+def nan_to_zero(values: np.asarray):
+    values[np.isnan(values)] = 0
+    return values
 
 
 def min_max(in_real):
@@ -35,3 +41,17 @@ def ichimoku_cloud(in_real):
     senkou_a = ([0] * 26) + senkou_a[:-26]
     senkou_b = ([0] * 26) + senkou_b[:-26]
     return tenkan, kijun, senkou_a, senkou_b, chikou
+
+
+def force_index(close, volume, period):
+    force_idx = [0]
+
+    for i in range(1, len(close)):
+        force = (close[i] - close[i - 1]) * volume[i]
+        force_idx.append(force)
+    if period == 1:
+        return force_idx
+    else:
+        ave_force_idx = talib.EMA(np.array(force_idx), period)
+        return nan_to_zero(ave_force_idx).tolist()
+

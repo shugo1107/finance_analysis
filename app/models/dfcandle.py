@@ -6,7 +6,7 @@ from app.models.candle import factory_candle_class
 from app.models.events import SignalEvents
 import settings
 from utils.utils import Serializer
-from tradingalgo.algo import ichimoku_cloud
+from tradingalgo.algo import ichimoku_cloud, force_index
 
 
 def nan_to_zero(values: np.asarray):
@@ -50,6 +50,20 @@ class Atr(Serializer):
         self.down = down
 
 
+class Di(Serializer):
+    def __init__(self, n: int, plus_di: list, minus_di: list):
+        self.n = n
+        self.plus_di = plus_di
+        self.minus_di = minus_di
+
+
+class Adx(Serializer):
+    def __init__(self, n: int, adx: list, adxr: list):
+        self.n = n
+        self.adx = adx
+        self.adxr = adxr
+
+
 class IchimokuCloud(Serializer):
     def __init__(self, tenkan: list, kijun: list, senkou_a: list,
                  senkou_b: list, chikou: list):
@@ -76,6 +90,12 @@ class Macd(Serializer):
         self.macd_hist = macd_hist
 
 
+class ForceIndex(Serializer):
+    def __init__(self, n: int, force_idx: list):
+        self.n = n
+        self.force_idx = force_idx
+
+
 class DataFrameCandle(object):
 
     def __init__(self, product_code=settings.product_code, duration=settings.trade_duration):
@@ -87,9 +107,12 @@ class DataFrameCandle(object):
         self.emas = []
         self.bbands = BBands(0, 0, [], [], [])
         self.atr = Atr(0, 0, [], [])
+        self.di = Di(0, [], [])
+        self.adx = Adx(0, [], [])
         self.ichimoku_cloud = IchimokuCloud([], [], [], [], [])
         self.rsi = Rsi(0, [])
         self.macd = Macd(0, 0, 0, [], [], [])
+        self.force_idx = []
         self.events = SignalEvents()
 
     def set_all_candles(self, limit=1000):
@@ -107,8 +130,11 @@ class DataFrameCandle(object):
             'bbands': self.bbands.value,
             'atr': self.atr.value,
             'ichimoku': self.ichimoku_cloud.value,
+            'di': self.di.value,
+            'adx': self.adx.value,
             'rsi': self.rsi.value,
             'macd': self.macd.value,
+            'force_idx': empty_to_none([s.value for s in self.force_idx]),
             'events': self.events.value,
         }
 
@@ -193,6 +219,30 @@ class DataFrameCandle(object):
             return True
         return False
 
+    def add_di(self, n: int):
+        if n <= len(self.closes):
+            plus_di = nan_to_zero(talib.PLUS_DI(
+                np.array(self.highs), np.array(self.lows),
+                np.array(self.closes), n)).tolist()
+            minus_di = nan_to_zero(talib.MINUS_DI(
+                np.array(self.highs), np.array(self.lows),
+                np.array(self.closes), n)).tolist()
+            self.di = Di(n, plus_di, minus_di)
+            return True
+        return False
+
+    def add_adx(self, n: int):
+        if n <= len(self.closes):
+            adx = nan_to_zero(talib.ADX(
+                np.array(self.highs), np.array(self.lows),
+                np.array(self.closes), n)).tolist()
+            adxr = nan_to_zero(talib.ADXR(
+                np.array(self.highs), np.array(self.lows),
+                np.array(self.closes), n)).tolist()
+            self.adx = Adx(n, adx, adxr)
+            return True
+        return False
+
     def add_ichimoku(self):
         if len(self.closes) >= 9:
             tenkan, kijun, senkou_a, senkou_b, chikou = ichimoku_cloud(self.closes)
@@ -224,6 +274,19 @@ class DataFrameCandle(object):
                 fast_period, slow_period, signal_period, macd_list, macd_signal_list, macd_hist_list)
             return True
         return False
+
+    def add_force_index(self, period: int):
+        if len(self.closes) > period:
+            values = force_index(self.closes, self.volumes, period)
+            force_idx = ForceIndex(period, values)
+            self.force_idx.append(force_idx)
+            return True
+        return False
+        # if len(self.candles) > period:
+        #     force_idx = force_index(self.closes, self.volumes, period)
+        #     self.force_idx = ForceIndex(period, force_idx)
+        #     return True
+        # return False
 
     def add_events(self, time):
         signal_events = SignalEvents.get_signal_events_after_time(time)
@@ -363,8 +426,8 @@ class DataFrameCandle(object):
         best_k_2 = 0.0
 
         for n in range(7, 17):
-            for k_1 in np.arange(1.5, 3.0, 0.1):
-                for k_2 in np.arange(-1.0, 1.0, 0.1):
+            for k_1 in np.arange(1.0, 3.0, 0.2):
+                for k_2 in np.arange(-1.0, 1.0, 0.2):
                     signal_events = self.back_test_atr(n, k_1, k_2)
                     if signal_events is None:
                         continue

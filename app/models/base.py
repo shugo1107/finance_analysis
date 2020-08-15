@@ -11,7 +11,8 @@ import settings
 
 logger = logging.getLogger(__name__)
 Base = declarative_base()
-engine = create_engine(f'sqlite:///{settings.db_name}?check_same_thread=False')
+# engine = create_engine(f'sqlite:///{settings.db_name}?check_same_thread=False')
+engine = create_engine('mysql+pymysql://root:{settings.password}@127.0.0.1/finance_data')
 Session = scoped_session(sessionmaker(bind=engine))
 lock = threading.Lock()
 

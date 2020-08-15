@@ -64,15 +64,15 @@ class BaseCandleMixin(object):
         candles.reverse()
         return candles
 
-    @classmethod
-    def get_atr(cls):
-        candles = cls.get_all_candles(15)
-        range_sum = 0
-        for i in range(1, len(candles)):
-            range_sum += max(candles[i - 1].close, candles[i].high) - min(candles[i - 1].close, candles[i].low)
-        true_range = range_sum / (len(candles) - 1)
-
-        return true_range
+    # @classmethod
+    # def get_atr(cls):
+    #     candles = cls.get_all_candles(15)
+    #     range_sum = 0
+    #     for i in range(1, len(candles)):
+    #         range_sum += max(candles[i - 1].close, candles[i].high) - min(candles[i - 1].close, candles[i].low)
+    #     true_range = range_sum / (len(candles) - 1)
+    #
+    #     return true_range
 
     @property
     def value(self):
@@ -403,7 +403,7 @@ def create_candle_with_duration(product_code, duration, ticker):
     price = ticker.mid_price
     if current_candle is None:
         cls.create(ticker_time, price, price, price, price, ticker.volume)
-        return True, 0, 0
+        return True
 
     if current_candle.high <= price:
         current_candle.high = price
@@ -412,4 +412,4 @@ def create_candle_with_duration(product_code, duration, ticker):
     current_candle.volume += ticker.volume
     current_candle.close = price
     current_candle.save()
-    return False, current_candle.high - current_candle.low, cls.get_atr()
+    return False

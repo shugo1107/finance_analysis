@@ -113,6 +113,24 @@ def api_make_handler():
             k = 2.0
         df.add_atr(n, k)
 
+    di = request.args.get('di')
+    if di:
+        str_n = request.args.get('diN')
+        if str_n:
+            n = int(str_n)
+        if not str_n or n < 0 or n is None:
+            n = 14
+        df.add_di(n)
+
+    adx = request.args.get('adx')
+    if adx:
+        str_n = request.args.get('adxN')
+        if str_n:
+            n = int(str_n)
+        if not str_n or n < 0 or n is None:
+            n = 14
+        df.add_adx(n)
+
     ichimoku = request.args.get('ichimoku')
     if ichimoku:
         df.add_ichimoku()
@@ -145,13 +163,30 @@ def api_make_handler():
             period_3 = 9
         df.add_macd(period_1, period_2, period_3)
 
+    force_idx = request.args.get('force_idx')
+    if force_idx:
+        str_force_idx_period_1 = request.args.get('forceIdxPeriod1')
+        str_force_idx_period_2 = request.args.get('forceIdxPeriod2')
+        str_force_idx_period_3 = request.args.get('forceIdxPeriod3')
+        if str_force_idx_period_1:
+            period_1 = int(str_force_idx_period_1)
+        if str_force_idx_period_2:
+            period_2 = int(str_force_idx_period_2)
+        if str_force_idx_period_3:
+            period_3 = int(str_force_idx_period_3)
+        if not str_force_idx_period_1 or period_1 < 0:
+            period_1 = 1
+        if not str_force_idx_period_2 or period_2 < 0:
+            period_2 = 2
+        if not str_force_idx_period_3 or period_3 < 0:
+            period_3 = 13
+        df.add_force_index(period_1)
+        df.add_force_index(period_2)
+        df.add_force_index(period_3)
+
     events = request.args.get('events')
     if events:
-        if settings.back_test:
-            from app.controllers.streamdata import stream
-            df.events = stream.ai.signal_events
-        else:
-            df.add_events(df.candles[0].time)
+        df.add_events(df.candles[0].time)
 
     return jsonify(df.value), 200
 
