@@ -103,6 +103,7 @@ class DataFrameCandle(object):
         self.duration = duration
         self.candle_cls = factory_candle_class(self.product_code, self.duration)
         self.candles = []
+        self.fraction_candle = None
         self.smas = []
         self.emas = []
         self.bbands = BBands(0, 0, [], [], [])
@@ -117,6 +118,7 @@ class DataFrameCandle(object):
 
     def set_all_candles(self, limit=1000):
         self.candles = self.candle_cls.get_all_candles(limit)
+        self.fraction_candle = self.candle_cls.get_fraction_candle(self.product_code)
         return self.candles
 
     @property
@@ -143,6 +145,8 @@ class DataFrameCandle(object):
         values = []
         for candle in self.candles:
             values.append(candle.open)
+        if self.fraction_candle is not None:
+            values.append(self.fraction_candle['open'])
         return values
 
     @property
@@ -150,6 +154,8 @@ class DataFrameCandle(object):
         values = []
         for candle in self.candles:
             values.append(candle.close)
+        if self.fraction_candle is not None:
+            values.append(self.fraction_candle['close'])
         return values
 
     @property
@@ -157,6 +163,8 @@ class DataFrameCandle(object):
         values = []
         for candle in self.candles:
             values.append(candle.high)
+        if self.fraction_candle is not None:
+            values.append(self.fraction_candle['high'])
         return values
 
     @property
@@ -164,6 +172,8 @@ class DataFrameCandle(object):
         values = []
         for candle in self.candles:
             values.append(candle.low)
+        if self.fraction_candle is not None:
+            values.append(self.fraction_candle['low'])
         return values
 
     @property
@@ -171,6 +181,8 @@ class DataFrameCandle(object):
         values = []
         for candle in self.candles:
             values.append(candle.volume)
+        if self.fraction_candle is not None:
+            values.append(self.fraction_candle['volume'])
         return values
 
     def add_sma(self, period: int):

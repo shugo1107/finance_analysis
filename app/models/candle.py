@@ -1,3 +1,4 @@
+from _datetime import datetime
 import logging
 
 from sqlalchemy import Column
@@ -11,6 +12,7 @@ from app.models.base import Base
 from app.models.base import session_scope
 
 import constants
+import settings
 
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,30 @@ class BaseCandleMixin(object):
 
         candles.reverse()
         return candles
+
+    @classmethod
+    def get_fraction_candle(cls, product_code=settings.product_code):
+        recent_time = cls.get_all_candles(limit=1)[0].time
+        with session_scope() as session:
+            table = factory_candle_class(
+                product_code=product_code, duration=constants.DURATION_5S)
+            candles = session.query(table).filter(
+                table.time >= recent_time).order_by(desc(table.time)).all()
+
+        if candles is None:
+            return None
+
+        high = candles[0].high
+        low = candles[0].low
+        close = candles[0].close
+        open = candles[-1].open
+        volume = 0
+        for i in range(len(candles)):
+            high = max(candles[i].high, high)
+            low = min(candles[i].low, low)
+            volume += candles[i].volume
+
+        return {'open': open, 'close': close, 'high': high, 'low': low, 'volume': volume}
 
     # @classmethod
     # def get_atr(cls):

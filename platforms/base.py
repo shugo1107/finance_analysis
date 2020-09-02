@@ -17,12 +17,23 @@ class Balance(object):
 
 
 class Position(object):
-    def __init__(self, product_code, side, units, require_collateral, leverage=25):
+    def __init__(self, product_code, side, units, require_collateral=0, trade_id=None,
+                 trade_signal=None, stop_loss=None, stop_trade_id=None, leverage=25):
         self.product_code = product_code
         self.side = side
         self.units = units
         self.leverage = leverage
         self.require_collateral = require_collateral
+        self.trade_id = trade_id
+        self.trade_signal = trade_signal
+        self.stop_loss = stop_loss
+        self.stop_trade_id = stop_trade_id
+
+    def __bool__(self):
+        if int(self.units) == 0:
+            return False
+        else:
+            return True
 
 
 class Ticker(object):
@@ -107,3 +118,9 @@ class Trade(object):
         self.side = side
         self.price = price
         self.units = units
+
+    def __bool__(self):
+        if int(self.units) == 0:
+            return False
+        else:
+            return True

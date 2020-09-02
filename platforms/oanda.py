@@ -6,6 +6,7 @@ import time
 
 import dateutil.parser
 from oandapyV20 import API
+from oandapyV20.contrib.requests import MarketOrderRequest, TrailingStopLossDetails
 from oandapyV20.endpoints import accounts
 from oandapyV20.endpoints import instruments
 from oandapyV20.endpoints import orders
@@ -27,6 +28,8 @@ import settings
 ORDER_FILLED = 'FILLED'
 
 logger = logging.getLogger(__name__)
+
+ticker_log_path = '/Users/shugo/ticker_timestamp.txt'
 
 
 class APIClient(object):
@@ -112,6 +115,8 @@ class APIClient(object):
                     volume = self.get_candle_volume()
                     ticker = Ticker(instrument, timestamp, bid, ask, volume)
                     callback(ticker)
+                    with open(ticker_log_path, mode='w') as f:
+                        f.write(str(timestamp))
 
         except V20Error as e:
             requests.post(settings.WEB_HOOK_URL, data=json.dumps({
@@ -275,3 +280,25 @@ class APIClient(object):
             logger.error(f'action=send_order error={e}')
             return False
 
+    def send_trail_stop(self, order: Order) -> Trade:
+        if order.side == constants.BUY:
+            units = order.units
+        elif order.side == constants.SELL:
+            units = -order.units
+        trailingStopLossOnFill = TrailingStopLossDetails(distance=order.price)
+        ordr = MarketOrderRequest(instrument=order.product_code, units=units,
+                                  trailingStopLossOnFill=trailingStopLossOnFill.data)
+        req = orders.OrderCreate(accountID=self.account_id, data=ordr.data)
+        try:
+            resp = self.client.request(req)
+            logger.info(f'action=send_trail_stop resp={resp}')
+        except V20Error as e:
+            logger.error(f'action=send_trail_stop error={e}')
+            return Trade(trade_id=None, side='BUY', price=0, units=0)
+        order_id = int(resp['orderCreateTransaction']['id']) + 1
+        price = resp['orderFillTransaction']['price']
+        units = units
+        side = order.side
+        trade = Trade(trade_id=order_id, side=side, price=price, units=units)
+
+        return trade
