@@ -57,34 +57,10 @@ class AI(object):
                              constants.PRODUCT_CODE_EUR_JPY: {"ATR": [], "EMA": [], "ADX": []},
                              constants.PRODUCT_CODE_EUR_USD: {"ATR": [], "EMA": [], "ADX": []},
                              constants.PRODUCT_CODE_GBP_USD: {"ATR": [], "EMA": [], "ADX": []}}
-            self.total_position = {
-                constants.PRODUCT_CODE_USD_JPY: {
-                    "ATR": Position(product_code=constants.PRODUCT_CODE_USD_JPY, side="BUY", units=0),
-                    "EMA": Position(product_code=constants.PRODUCT_CODE_USD_JPY, side="BUY", units=0),
-                    "ADX": Position(product_code=constants.PRODUCT_CODE_USD_JPY, side="BUY", units=0)},
-                constants.PRODUCT_CODE_EUR_JPY: {
-                    "ATR": Position(product_code=constants.PRODUCT_CODE_EUR_JPY, side="BUY", units=0),
-                    "EMA": Position(product_code=constants.PRODUCT_CODE_EUR_JPY, side="BUY", units=0),
-                    "ADX": Position(product_code=constants.PRODUCT_CODE_EUR_JPY, side="BUY", units=0)},
-                constants.PRODUCT_CODE_EUR_USD: {
-                    "ATR": Position(product_code=constants.PRODUCT_CODE_EUR_USD, side="BUY", units=0),
-                    "EMA": Position(product_code=constants.PRODUCT_CODE_EUR_USD, side="BUY", units=0),
-                    "ADX": Position(product_code=constants.PRODUCT_CODE_EUR_USD, side="BUY", units=0)},
-                constants.PRODUCT_CODE_GBP_USD: {
-                    "ATR": Position(product_code=constants.PRODUCT_CODE_GBP_USD, side="BUY", units=0),
-                    "EMA": Position(product_code=constants.PRODUCT_CODE_GBP_USD, side="BUY", units=0),
-                    "ADX": Position(product_code=constants.PRODUCT_CODE_GBP_USD, side="BUY", units=0)},
-            }
         elif client.lower() == "bitflyer":
             self.API = BitflyerClient(settings.bitflyer_access_key, settings.bitflyer_secret_key)
             self.leverage = 4
             self.position = {constants.PRODUCT_CODE_FX_BTC_JPY: {"ATR": [], "EMA": [], "ADX": []}}
-            self.total_position = {
-                constants.PRODUCT_CODE_FX_BTC_JPY: {
-                    "ATR": Position(product_code=constants.PRODUCT_CODE_FX_BTC_JPY, side="BUY", units=0),
-                    "EMA": Position(product_code=constants.PRODUCT_CODE_FX_BTC_JPY, side="BUY", units=0),
-                    "ADX": Position(product_code=constants.PRODUCT_CODE_FX_BTC_JPY, side="BUY", units=0)}
-            }
 
         if back_test:
             self.signal_events = SignalEvents()
@@ -119,50 +95,32 @@ class AI(object):
                                      constants.PRODUCT_CODE_EUR_USD: 0.0020,
                                      constants.PRODUCT_CODE_GBP_USD: 0.0020,
                                      constants.PRODUCT_CODE_FX_BTC_JPY: 3000}
-
-    def update_optimize_params(self, is_continue: bool, product_code=None):
-        if product_code is None:
-            product_code = self.product_code
-        if product_code not in self.optimized_trade_params.keys():
-            self.optimized_trade_params[product_code] = None
-        logger.info('action=update_optimize_params status=run')
-        df = DataFrameCandle(product_code, self.duration)
-        df.set_all_candles(self.past_period)
-        if df.candles:
-            self.optimized_trade_params[product_code] = df.optimize_params()
-        if self.optimized_trade_params[product_code] is not None:
-            logger.info(f'action=update_optimize_params params={self.optimized_trade_params[
-                product_code].__dict__}, product_code={product_code}')
-            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
-                'text': f"optimized_params={self.optimized_trade_params[
-                    product_code].__dict__}, product_code={product_code}",
-            }))
-
-        if is_continue and self.optimized_trade_params is None:
-            time.sleep(10 * duration_seconds(self.duration))
-            self.update_optimize_params(is_continue)
+    #
+    # def update_optimize_params(self, is_continue: bool, product_code=None):
+    #     if product_code is None:
+    #         product_code = self.product_code
+    #     if product_code not in self.optimized_trade_params.keys():
+    #         self.optimized_trade_params[product_code] = None
+    #     logger.info('action=update_optimize_params status=run')
+    #     df = DataFrameCandle(product_code, self.duration)
+    #     df.set_all_candles(self.past_period)
+    #     if df.candles:
+    #         self.optimized_trade_params[product_code] = df.optimize_params()
+    #     if self.optimized_trade_params[product_code] is not None:
+    #         logger.info(f'action=update_optimize_params params={self.optimized_trade_params[
+    #             product_code].__dict__}, product_code={product_code}')
+    #         requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+    #             'text': f"optimized_params={self.optimized_trade_params[
+    #                 product_code].__dict__}, product_code={product_code}",
+    #         }))
+    #
+    #     if is_continue and self.optimized_trade_params is None:
+    #         time.sleep(10 * duration_seconds(self.duration))
+    #         self.update_optimize_params(is_continue)
 
     def reset_position_list(self):
-        for product_code in self.position.keys():
-            self.position[product_code] = {"ATR": [], "EMA": [], "ADX": []}
-
-    def sum_position(self):
         for product_code in self.product_codes:
-            for signal in ['ATR', 'ADX', 'EMA']:
-                if not self.position[product_code][signal]:
-                    position = Position(product_code=product_code, side="BUY", units=0, trade_signal=signal)
-                else:
-                    side = self.position[product_code][signal][0].side
-                    units = 0
-                    require_collateral = 0
-                    stop_loss = self.position[product_code][signal][0].stop_loss
-                    leverage = self.leverage
-                    for posi in self.position[product_code][signal]:
-                        units += posi.units
-                        require_collateral += posi.require_collateral
-                    position = Position(product_code=product_code, side=side, units=abs(units), trade_signal=signal,
-                                        stop_loss=stop_loss, require_collateral=require_collateral, leverage=leverage)
-                self.total_position[product_code][signal] = position
+            self.position[product_code] = {"ATR": [], "EMA": [], "ADX": []}
 
     def get_current_position(self):
         # if product_code is None:
@@ -188,11 +146,6 @@ class AI(object):
             logger.warning('position list is not complete')
         for position in self.position_list:
             self.position[position.product_code][position.trade_signal].append(position)
-        self.sum_position()
-        for product_code in self.product_codes:
-            for signal in ['ATR', 'EMA', 'ADX']:
-                print(f'product_code: {product_code}, signal: {signal}, position: {bool(
-                    self.total_position[product_code][signal])}')
         # buy_unit = 0
         # sell_unit = 0
         # for i in range(len(self.trade_list)):
@@ -223,46 +176,44 @@ class AI(object):
         if product_code not in constants.TRADABLE_PAIR:
             logger.warning('action=can_buy status=false error=not_tradable_product')
             return False
-        # if self.start_trade > candle.time:
-        #     logger.warning('action=can_buy status=false error=old_time')
-        #     return False
+        if self.start_trade > candle.time:
+            logger.warning('action=can_buy status=false error=old_time')
+            return False
         # if self.in_atr_trade:
         #     logger.warning('action=can_buy status=false error=in_ATR_trade')
         #     return False
         # if self.position.side == constants.SELL:
         #     return True
-        elif units * candle.close > float(self.balance.available) * self.leverage - float(
-                self.balance.require_collateral):
+        elif float(self.balance.available) * 0.8 <\
+                units * candle.close / self.leverage + float(self.balance.require_collateral):
             logger.warning('action=can_buy status=false error=too much position')
             return False
-        elif self.position.units < units * 0.8:
-            return True
         else:
-            logger.warning('action=can_buy status=false error=probably already has the same position')
-            return False
+            logger.warning('action=can_buy status=true')
+            return True
 
     def can_sell(self, candle, units, product_code=None):
         if product_code is None:
             product_code = self.product_code
         if product_code not in constants.TRADABLE_PAIR:
             logger.warning('action=can_sell status=false error=not_tradable_product')
-        # if self.start_trade > candle.time:
-        #     logger.warning('action=can_sell status=false error=old_time')
-        #     return False
+        if self.start_trade > candle.time:
+            logger.warning('action=can_sell status=false error=old_time')
+            return False
         # if self.in_atr_trade:
         #     logger.warning('action=can_sell status=false error=in_ATR_trade')
         #     return False
         # if self.position.side == constants.BUY:
         #     return True
-        elif units * candle.close > float(self.balance.available) * self.position.leverage - float(
-                self.position.require_collateral):
+        elif float(self.balance.available) * 0.8 < \
+                units * candle.close / self.leverage + float(self.balance.require_collateral):
             logger.warning('action=can_sell status=false error=too much position')
             return False
         # elif self.position.units < units * 0.8:
         #     return True
         else:
-            logger.warning('action=can_sell status=false error=probably already has the same position')
-            return False
+            logger.warning('action=can_sell status=true')
+            return True
 
     def buy(self, candle, units, back_test=False, product_code=None):
         logger.info('action=buy status=run')
@@ -376,15 +327,15 @@ class AI(object):
                 product_code, candle.time, candle.close, 1.0, save=False)
             return could_buy
 
-        # if self.start_trade > candle.time:
-        #     logger.warning('action=trail_buy status=false error=old_time')
-        #     return False
+        if self.start_trade > candle.time:
+            logger.warning('action=trail_buy status=false error=old_time')
+            return False
 
-        # if not self.can_buy(candle, units, product_code):
-        #     logger.warning('action=trail_buy status=false error=cannot buy')
-        #     return False
+        if not self.can_buy(candle, units, product_code):
+            logger.warning('action=trail_buy status=false error=cannot buy')
+            return False
 
-        if self.total_position[product_code][trade_signal]:
+        if self.position[product_code][trade_signal]:
             logger.info('action=trail_buy status=false error=already_has_the_same_position')
             return False
 
@@ -393,16 +344,17 @@ class AI(object):
         trade = self.API.send_trail_stop(order)
         if not trade:
             return False
+        require_collateral = self.leverage * units * float(trade.price) * fx_adjustment
         position = Position(product_code=product_code, side=trade.side, units=trade.units,
-                            require_collateral=self.leverage * units * float(trade.price) * fx_adjustment,
-                            trade_id=trade.trade_id, trade_signal=trade_signal,
-                            stop_loss=stop_loss, leverage=self.leverage)
+                            require_collateral=require_collateral, trade_id=trade.trade_id, trade_signal=trade_signal,
+                            stop_loss=stop_loss)
+        self.balance.require_collateral += require_collateral
         logger.info(f'position={position.__dict__}')
         self.position_list.append(position)
         logger.info(f'position_list={self.position_list}')
-        self.total_position[product_code][trade_signal] = position
-        logger.info(f'total_position={self.total_position}')
-        logger.info(f'total_position[{product_code}][{trade_signal}]={self.total_position[product_code][trade_signal]}')
+        self.position[product_code][trade_signal].append(position)
+        logger.info(f'position={self.position}')
+        logger.info(f'position[{product_code}][{trade_signal}]={self.position[product_code][trade_signal]}')
         # self.signal_events.buy(product_code, candle.time, trade.price, units, save=True)
         return True
 
@@ -423,25 +375,30 @@ class AI(object):
             logger.warning('action=trail_sell status=false error=old_time')
             return False
 
-        # if not self.can_sell(candle, units, product_code):
-        #     logger.warning('action=trail_sell status=false error=cannot buy')
-        #     return False
-        #
-        # if self.total_position[product_code][trade_signal]:
-        #     logger.info('action=trail_sell status=false error=already_has_the_same_position')
-        #     return False
+        if not self.can_sell(candle, units, product_code):
+            logger.warning('action=trail_sell status=false error=cannot buy')
+            return False
+
+        if self.position[product_code][trade_signal]:
+            logger.info('action=trail_sell status=false error=already_has_the_same_position')
+            return False
 
         order = Order(product_code, constants.SELL, units, price=trail_offset, order_type='TRAIL')
         logger.info(f'action=trail_sell order={order.__dict__}')
         trade = self.API.send_trail_stop(order)
         if not trade:
             return False
+        require_collateral = self.leverage * units * float(trade.price) * fx_adjustment
         position = Position(product_code=product_code, side=trade.side, units=trade.units,
-                            require_collateral=self.leverage * units * float(trade.price) * fx_adjustment,
-                            trade_id=trade.trade_id, trade_signal=trade_signal,
-                            stop_loss=stop_loss, leverage=self.leverage)
+                            require_collateral=require_collateral, trade_id=trade.trade_id, trade_signal=trade_signal,
+                            stop_loss=stop_loss)
+        self.balance.require_collateral += require_collateral
+        logger.info(f'position={position.__dict__}')
         self.position_list.append(position)
-        self.total_position[product_code][trade_signal] = position
+        logger.info(f'position_list={self.position_list}')
+        self.position[product_code][trade_signal].append(position)
+        logger.info(f'position={self.position}')
+        logger.info(f'position[{product_code}][{trade_signal}]={self.position[product_code][trade_signal]}')
         # self.signal_events.sell(product_code, candle.time, trade.price, units, save=True)
         return True
 
@@ -495,18 +452,18 @@ class AI(object):
                     fx_adjustment = 1
                 elif product_code[-3:] == "USD":
                     usd_jpy = DataFrameCandle("USD_JPY", self.duration)
-                    usd_jpy.set_all_candles(1)
+                    usd_jpy.set_recent_candles(1)
                     fx_adjustment = usd_jpy.candles[-1].close
                 elif product_code[-3:] == "EUR":
                     eur_jpy = DataFrameCandle("EUR_JPY", self.duration)
-                    eur_jpy.set_all_candles(1)
+                    eur_jpy.set_recent_candles(1)
                     fx_adjustment = eur_jpy.candles[-1].close
                 else:
                     fx_adjustment = 1
                 fx_adjustments[product_code] = fx_adjustment
 
                 df = DataFrameCandle(product_code, self.duration)
-                df.set_all_candles(self.past_period)
+                df.set_recent_candles(self.past_period)
 
                 ema_values_1 = talib.EMA(np.array(df.closes), self.params['ema_period_1'])
                 ema_values_2 = talib.EMA(np.array(df.closes), self.params['ema_period_2'])
@@ -527,7 +484,7 @@ class AI(object):
                 atr_down = (mid_list - atr * self.params['atr_k_1']).tolist()
                 atr_up_2 = (mid_list + atr * self.params['atr_k_2']).tolist()
                 atr_down_2 = (mid_list - atr * self.params['atr_k_2']).tolist()
-                indicator = {'df': df.closes[-2:], 'ema_values_1': ema_values_1[-2:], 'ema_values_2': ema_values_2[-2:],
+                indicator = {'df': df.candles[-2:], 'ema_values_1': ema_values_1[-2:], 'ema_values_2': ema_values_2[-2:],
                              'ema_values_3': ema_values_3[-2:], 'di_plus': di_plus[-4:], 'di_minus': di_minus[-4:],
                              'adx': adx[-4:], 'adxr': adxr[-4:], 'atr_up': atr_up[-2:], 'atr_down': atr_down[-2:],
                              'atr_up_2': atr_up_2[-2:], 'atr_down_2': atr_down_2[-2:]}
@@ -794,117 +751,145 @@ class AI(object):
 
     def ema_trade(self, indicator, product_code, fx_adjustment):
         # logger.info(f'action=ema_trade product_code={product_code} status=run')
-        position = self.total_position[product_code]['EMA']
+        positions = self.position[product_code]['EMA']
         # position closeの確認
-        if position and position.side == "BUY" and indicator['ema_values_1'][-1] < indicator['ema_values_2'][-1]:
+        if positions and positions[0].side == "BUY" and indicator['ema_values_1'][-1] < indicator['ema_values_2'][-1]:
             logger.info(f'action=ema_close product_code={product_code}')
-            for trade in self.position[product_code]['EMA']:
-                self.API.trade_close(trade.trade_id)
-            self.total_position[product_code]['EMA'] = Position(product_code=product_code, side='BUY', units=0)
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'ema_close_trade product_code={product_code}',  # 通知内容
+            }))
+            for position in positions:
+                self.API.trade_close(position.trade_id)
             self.position[product_code]['EMA'] = []
-        if position and position.side == "SELL" and indicator['ema_values_1'][-1] > indicator['ema_values_2'][-1]:
+        if positions and positions[0].side == "SELL" and indicator['ema_values_1'][-1] > indicator['ema_values_2'][-1]:
             logger.info(f'action=ema_close product_code={product_code}')
-            for trade in self.position[product_code]['EMA']:
-                self.API.trade_close(trade.trade_id)
-            self.total_position[product_code]['EMA'] = Position(product_code=product_code, side='BUY', units=0)
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'ema_close_trade product_code={product_code}',  # 通知内容
+            }))
+            for position in positions:
+                self.API.trade_close(position.trade_id)
             self.position[product_code]['EMA'] = []
 
         # 新規EMAトレード
-        if not position \
+        if not positions \
                 and indicator['ema_values_3'][-2] > indicator['ema_values_1'][-2] > indicator['ema_values_2'][-2] \
                 and indicator['ema_values_1'][-1] > indicator['ema_values_3'][-1] > indicator['ema_values_2'][-1]:
             logger.info(f'action=new_trade signal=EMA product_code={product_code}')
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'ema_new_trade product_code={product_code}',  # 通知内容
+            }))
             units = self.calc_units(self.default_trail_offset[product_code], fx_adjustment)
             self.trail_buy(indicator['df'][-1], units=units, product_code=product_code, trade_signal='EMA',
                            fx_adjustment=fx_adjustment)
 
-        if not position \
+        if not positions \
                 and indicator['ema_values_3'][-2] < indicator['ema_values_1'][-2] < indicator['ema_values_2'][-2] \
                 and indicator['ema_values_1'][-1] < indicator['ema_values_3'][-1] < indicator['ema_values_2'][-1]:
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'ema_new_trade product_code={product_code}',  # 通知内容
+            }))
             units = self.calc_units(self.default_trail_offset[product_code], fx_adjustment)
             self.trail_sell(indicator['df'][-1], units=units, product_code=product_code, trade_signal='EMA',
                             fx_adjustment=fx_adjustment)
 
     def atr_trade(self, indicator, product_code, fx_adjustment):
         logger.info(f'action=atr_trade product_code={product_code} status=run')
-        position = self.total_position[product_code]['ATR']
+        positions = self.position[product_code]['ATR']
         # Loss cutの確認
-        if position and position.side == "BUY" and indicator['df'][-1] < position.stop_loss:
-            for trade in self.position[product_code]['ATR']:
-                self.API.trade_close(trade.trade_id)
-            self.total_position[product_code]['ATR'] = Position(product_code=product_code, side='BUY', units=0)
+        if positions and positions[0].side == "BUY" and indicator['df'][-1].close < positions[0].stop_loss:
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'atr_close_trade product_code={product_code}',  # 通知内容
+            }))
+            for position in positions:
+                self.API.trade_close(position.trade_id)
             self.position[product_code]['ATR'] = []
-        if position and position.side == "SELL" and indicator['df'][-1] > position.stop_loss:
-            for trade in self.position[product_code]['ATR']:
-                self.API.trade_close(trade.trade_id)
-            self.total_position[product_code]['ATR'] = Position(product_code=product_code, side='BUY', units=0)
+        if positions and positions[0].side == "SELL" and indicator['df'][-1].close > positions[0].stop_loss:
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'atr_close_trade product_code={product_code}',  # 通知内容
+            }))
+            for position in positions:
+                self.API.trade_close(position.trade_id)
             self.position[product_code]['ATR'] = []
 
         # 買いのときの手動で出すSLの更新
-        if position and position.side == "BUY" and indicator['atr_up_2'][-1] > position.stop_loss:
+        if positions and position.side == "BUY" and indicator['atr_up_2'][-1] > positions[0].stop_loss:
             stop_loss = math.floor(indicator['atr_up_2'][-1] / constants.MIN_TRADE_PRICE_MAP[product_code]) \
                         * constants.MIN_TRADE_PRICE_MAP[product_code]
-            updated_position = Position(product_code=position.product_code, side=position.side, units=position.units,
-                                        require_collateral=position.require_collateral, stop_loss=stop_loss,
-                                        leverage=position.leverage)
-            self.total_position[product_code]['ATR'] = updated_position
+            logger.info('action=atr_trade status=updated_stop_loss')
+            for position in positions:
+                position.stop_loss = stop_loss
 
         # 売りのときの手動で出すSLの更新
         if position and position.side == "SELL" and indicator['atr_down_2'][-1] < position.stop_loss:
             stop_loss = math.floor(indicator['atr_down_2'][-1] / constants.MIN_TRADE_PRICE_MAP[product_code]) \
                         * constants.MIN_TRADE_PRICE_MAP[product_code]
-            updated_position = Position(product_code=position.product_code, side=position.side, units=position.units,
-                                        require_collateral=position.require_collateral, stop_loss=stop_loss,
-                                        leverage=position.leverage)
-            self.total_position[product_code]['ATR'] = updated_position
+            logger.info('action=atr_trade status=updated_stop_loss')
+            for position in positions:
+                position.stop_loss = stop_loss
 
         # 新規ATRトレード
-        if not position and indicator['atr_up'][-2] > indicator['df'][-2] \
-                and indicator['atr_up'][-1] < indicator['df'][-1]:
+        if not positions and indicator['atr_up'][-2] > indicator['df'][-2].close \
+                and indicator['atr_up'][-1] < indicator['df'][-1].close:
             units = self.calc_units(self.default_trail_offset[product_code], fx_adjustment)
             stop_loss = math.floor(indicator['atr_up_2'][-1] / constants.MIN_TRADE_PRICE_MAP[product_code]) \
                         * constants.MIN_TRADE_PRICE_MAP[product_code]
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'atr_new_trade product_code={product_code}',  # 通知内容
+            }))
             self.trail_buy(indicator['df'][-1], units=units, product_code=product_code, trade_signal='ATR',
                            fx_adjustment=fx_adjustment, stop_loss=stop_loss)
 
-        if not position and indicator['atr_down'][-2] < indicator['df'][-2] \
-                and indicator['atr_down'][-1] > indicator['df'][-1]:
+        if not position and indicator['atr_down'][-2] < indicator['df'][-2].close \
+                and indicator['atr_down'][-1] > indicator['df'][-1].close:
             units = self.calc_units(self.default_trail_offset[product_code], fx_adjustment)
             stop_loss = math.floor(indicator['atr_down_2'][-1] / constants.MIN_TRADE_PRICE_MAP[product_code]) \
                         * constants.MIN_TRADE_PRICE_MAP[product_code]
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'atr_new_trade product_code={product_code}',  # 通知内容
+            }))
             self.trail_sell(indicator['df'][-1], units=units, product_code=product_code, trade_signal='ATR',
                             fx_adjustment=fx_adjustment, stop_loss=stop_loss)
 
     def adx_trade(self, indicator, product_code, fx_adjustment):
         logger.info(f'action=adx_trade product_code={product_code} status=run')
-        position = self.total_position[product_code]['ADX']
+        positions = self.position[product_code]['ADX']
         # position closeの確認
-        if position and position.side == "BUY" \
+        if positions and positions[0].side == "BUY" \
                 and (indicator['di_plus'][-1] < indicator['di_minus'][-1]
                      or indicator['adx'][-4] > indicator['adx'][-3] > indicator['adx'][-2] > indicator['adx'][-1]):
-            for trade in self.position[product_code]['ADX']:
-                self.API.trade_close(trade.trade_id)
-            self.total_position[product_code]['ADX'] = Position(product_code=product_code, side='BUY', units=0)
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'adx_close_trade product_code={product_code}',  # 通知内容
+            }))
+            for position in positions:
+                self.API.trade_close(position.trade_id)
             self.position[product_code]['ADX'] = []
-        if position and position.side == "SELL" \
+        if positions and positions[0].side == "SELL" \
                 and (indicator['di_plus'][-1] > indicator['di_minus'][-1]
                      or indicator['adx'][-4] > indicator['adx'][-3] > indicator['adx'][-2] > indicator['adx'][-1]):
-            for trade in self.position[product_code]['ADX']:
-                self.API.trade_close(trade.trade_id)
-            self.total_position[product_code]['ADX'] = Position(product_code=product_code, side='BUY', units=0)
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'adx_close_trade product_code={product_code}',  # 通知内容
+            }))
+            for position in positions:
+                self.API.trade_close(position.trade_id)
             self.position[product_code]['ADX'] = []
 
         # 新規ADXトレード
-        if not position \
+        if not positions \
                 and indicator['adxr'][-2] > indicator['adx'][-2] and indicator['adxr'][-1] < indicator['adx'][-1] \
                 and indicator['di_plus'][-1] > indicator['di_minus'][-1]:
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'adx_new_trade product_code={product_code}',  # 通知内容
+            }))
             units = self.calc_units(self.default_trail_offset[product_code], fx_adjustment)
             self.trail_buy(indicator['df'][-1], units=units, product_code=product_code, trade_signal='ADX',
                            fx_adjustment=fx_adjustment)
 
-        if not position \
+        if not positions \
                 and indicator['adxr'][-2] > indicator['adx'][-2] and indicator['adxr'][-1] < indicator['adx'][-1] \
                 and indicator['di_plus'][-1] < indicator['di_minus'][-1]:
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': f'adx_new_trade product_code={product_code}',  # 通知内容
+            }))
             units = self.calc_units(self.default_trail_offset[product_code], fx_adjustment)
             self.trail_sell(indicator['df'][-1], units=units, product_code=product_code, trade_signal='ADX',
                             fx_adjustment=fx_adjustment)
