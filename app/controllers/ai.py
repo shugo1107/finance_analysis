@@ -51,8 +51,8 @@ class AI(object):
             self.API = OandaClient(settings.oanda_access_token, settings.oanda_account_id, environment=live_practice)
             self.leverage = 25
             self.product_codes = constants.TRADABLE_PAIR
-            self.signals = {constants.PRODUCT_CODE_USD_JPY: 0, constants.PRODUCT_CODE_EUR_JPY: 0,
-                            constants.PRODUCT_CODE_EUR_USD: 0, constants.PRODUCT_CODE_GBP_USD: 0}
+            # self.signals = {constants.PRODUCT_CODE_USD_JPY: 0, constants.PRODUCT_CODE_EUR_JPY: 0,
+            #                 constants.PRODUCT_CODE_EUR_USD: 0, constants.PRODUCT_CODE_GBP_USD: 0}
             self.position = {constants.PRODUCT_CODE_USD_JPY: {"ATR": [], "EMA": [], "ADX": []},
                              constants.PRODUCT_CODE_EUR_JPY: {"ATR": [], "EMA": [], "ADX": []},
                              constants.PRODUCT_CODE_EUR_USD: {"ATR": [], "EMA": [], "ADX": []},
