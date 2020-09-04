@@ -146,6 +146,12 @@ class AI(object):
             logger.warning('position list is not complete')
         for position in self.position_list:
             self.position[position.product_code][position.trade_signal].append(position)
+
+        for product_code in self.product_codes:
+            for signal in ['ADX', 'ATR', 'EMA']:
+                requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                    'text': f'product_code={product_code}, signal={signal}, has_position={bool(self.position[product_code][signal])}',  # 通知内容
+                }))
         # buy_unit = 0
         # sell_unit = 0
         # for i in range(len(self.trade_list)):
