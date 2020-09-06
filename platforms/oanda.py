@@ -1,3 +1,4 @@
+
 from datetime import datetime
 import json
 import logging
@@ -46,9 +47,9 @@ class APIClient(object):
             logger.error(f'action=get_balance error={e}')
             raise
 
-        available = resp['account']['balance']
+        available = float(resp['account']['balance'])
         currency = resp['account']['currency']
-        require_collateral = resp['account']['marginUsed']
+        require_collateral = float(resp['account']['marginUsed'])
         return Balance(currency, available, require_collateral)
 
     # def get_open_position(self):
@@ -232,7 +233,10 @@ class APIClient(object):
             logger.info(f'action=trade_close resp={resp}')
         except V20Error as e:
             logger.error(f'action=trade_close error={e}')
-            raise
+            requests.post(settings.WEB_HOOK_URL, data=json.dumps({
+                'text': u'cannot close trade',  # 通知内容
+            }))
+            return Trade(0, constants.BUY, 0, 0)
 
         trade = Trade(
             trade_id=trade_id,

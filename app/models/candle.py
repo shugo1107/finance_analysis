@@ -1,3 +1,4 @@
+
 from _datetime import datetime
 import logging
 
@@ -78,6 +79,7 @@ class BaseCandleMixin(object):
         if candles is None:
             return None
 
+        time = candles[0].time
         high = candles[0].high
         low = candles[0].low
         close = candles[0].close
@@ -88,7 +90,13 @@ class BaseCandleMixin(object):
             low = min(candles[i].low, low)
             volume += candles[i].volume
 
-        return {'open': open, 'close': close, 'high': high, 'low': low, 'volume': volume}
+        candle = cls(time=time,
+                     open=open,
+                     close=close,
+                     high=high,
+                     low=low,
+                     volume=volume)
+        return candle
 
     # @classmethod
     # def get_atr(cls):

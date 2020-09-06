@@ -121,6 +121,11 @@ class DataFrameCandle(object):
         self.fraction_candle = self.candle_cls.get_fraction_candle(self.product_code)
         return self.candles
 
+    def set_recent_candles(self, limit=1000):
+        self.set_all_candles(limit)
+        self.candles = self.candles.append(self.fraction_candle)
+        return self.candles
+
     @property
     def value(self):
         return {
@@ -145,8 +150,6 @@ class DataFrameCandle(object):
         values = []
         for candle in self.candles:
             values.append(candle.open)
-        if self.fraction_candle is not None:
-            values.append(self.fraction_candle['open'])
         return values
 
     @property
@@ -154,8 +157,6 @@ class DataFrameCandle(object):
         values = []
         for candle in self.candles:
             values.append(candle.close)
-        if self.fraction_candle is not None:
-            values.append(self.fraction_candle['close'])
         return values
 
     @property
@@ -163,8 +164,6 @@ class DataFrameCandle(object):
         values = []
         for candle in self.candles:
             values.append(candle.high)
-        if self.fraction_candle is not None:
-            values.append(self.fraction_candle['high'])
         return values
 
     @property
@@ -172,8 +171,6 @@ class DataFrameCandle(object):
         values = []
         for candle in self.candles:
             values.append(candle.low)
-        if self.fraction_candle is not None:
-            values.append(self.fraction_candle['low'])
         return values
 
     @property
@@ -181,8 +178,6 @@ class DataFrameCandle(object):
         values = []
         for candle in self.candles:
             values.append(candle.volume)
-        if self.fraction_candle is not None:
-            values.append(self.fraction_candle['volume'])
         return values
 
     def add_sma(self, period: int):
@@ -605,5 +600,3 @@ class DataFrameCandle(object):
             'macd_slow_period': macd_slow_period,
             'macd_signal_period': macd_signal_period,
         })
-
-
